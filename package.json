@@ -1,0 +1,38 @@
+{
+  "name": "pfxp",
+  "module": "index.ts",
+  "devDependencies": {
+    "@dotenvx/dotenvx": "^1.49.0",
+    "@types/bun": "^1.2.21"
+  },
+  "peerDependencies": {
+    "typescript": "^5.9.2"
+  },
+  "private": true,
+  "scripts": {
+    "start": "bun run index.ts",
+    "server": "bun run index.ts",
+    "api": "bun run index.ts",
+    "build:client": "bun build src/client/app.ts --outdir=public/assets --minify --target=browser --splitting",
+    "postbuild:client": "bun run scripts/postbuild.ts",
+    "build": "bun run build:client && bun run postbuild:client",
+    "preview": "bun run build && bun run server",
+    "dev": "bun run dev.ts",
+    "dev:server": "bun --watch run index.ts",
+    "dev:client": "bun build src/client/app.ts --outdir=public/assets --minify --target=browser --sourcemap=external --watch --splitting",
+    "dev:reset": "RESET=1 bun run scripts/postbuild.ts",
+    "cli": "dotenvx run -- bun run src/cli.ts",
+    "cli:headed": "dotenvx run -- bun run src/cli.ts --headed",
+    "playwright:install": "bunx playwright install firefox"
+  },
+  "type": "module",
+  "dependencies": {
+    "@popperjs/core": "^2.11.8",
+    "ag-grid-community": "^34.1.2",
+    "bootstrap": "^5.3.8",
+    "fuse.js": "^7.1.0",
+    "localforage": "^1.10.0",
+    "luxon": "^3.7.1",
+    "playwright": "^1.55.0"
+  }
+}

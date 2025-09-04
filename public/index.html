@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en" data-bs-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests" />
+    <title>PFS/SFS Sessions</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="/favicon.ico" sizes="any" />
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+<body class="text-body is-loading">
+    <nav class="navbar navbar-expand-lg bg-body-tertiary mb-3">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="#">PFXP</a>
+        <div class="d-flex ms-auto gap-2 align-items-center">
+          <div class="d-flex align-items-center gap-2">
+            <label for="previousRuns" class="form-label mb-0 small text-secondary">Previous Runs</label>
+            <select id="previousRuns" class="form-select form-select-sm">
+              <option value="" disabled selected>No saved runs</option>
+            </select>
+            <button id="loadRunBtn" class="btn btn-outline-info btn-sm" disabled>Load</button>
+            <button id="deleteRunBtn" class="btn btn-outline-danger btn-sm" disabled>Delete</button>
+          </div>
+          <div class="form-check form-switch ms-2">
+            <input class="form-check-input" type="checkbox" id="darkSwitch">
+            <label class="form-check-label" for="darkSwitch">Dark</label>
+          </div>
+          <button id="resetLayoutBtn" class="btn btn-outline-warning btn-sm" title="Reset entire layout">Reset Layout</button>
+          <button id="refreshBtn" class="btn btn-outline-secondary btn-sm" disabled>Refresh</button>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container-fluid">
+      <div id="authCard" class="card mb-3">
+        <div class="card-header">Sign in to Paizo</div>
+        <div class="card-body">
+          <form id="authForm" class="row gy-2 gx-3 align-items-center">
+            <div class="col-sm-5">
+              <label class="form-label" for="email">Email</label>
+              <input type="email" class="form-control" id="email" required />
+            </div>
+            <div class="col-sm-5">
+              <label class="form-label" for="password">Password</label>
+              <input type="password" class="form-control" id="password" required />
+            </div>
+            <div class="col-sm-2 d-flex align-items-end">
+              <button type="submit" class="btn btn-primary w-100" id="fetchBtn">Fetch</button>
+            </div>
+          </form>
+          <div class="text-center my-3"><span class="text-secondary">— or —</span></div>
+          <div class="d-flex align-items-center gap-2">
+            <input type="file" class="form-control" id="loadJsonInput" accept="application/json,.json" />
+            <button class="btn btn-outline-info" id="loadJsonBtn" type="button">Load JSON</button>
+          </div>
+          <div id="authHelp" class="form-text mt-2">Your credentials are sent to your own server and never stored client-side. Alternatively, you can load a previously saved JSON file from disk.</div>
+        </div>
+      </div>
+
+      <div id="statusAlert" class="alert alert-info d-none" role="alert"></div>
+
+      <div id="filtersCard" class="card mb-3 d-none">
+        <div class="card-header d-flex align-items-center justify-content-between">
+          <span>Filters</span>
+        </div>
+        <div class="card-body">
+          <div class="row g-2 align-items-center mb-2">
+            <div class="col-auto">Combine with</div>
+            <div class="col-auto">
+              <select id="combineMode" class="form-select form-select-sm">
+                <option value="AND">AND</option>
+                <option value="OR">OR</option>
+              </select>
+            </div>
+            <div class="col-auto">
+              <button id="addFilter" class="btn btn-outline-secondary btn-sm">Add filter</button>
+            </div>
+          </div>
+          <div id="filters" class="d-flex flex-wrap gap-2"></div>
+        </div>
+      </div>
+
+      <div class="card d-none" id="tableCard">
+        <div class="card-header d-flex align-items-center justify-content-between">
+          <span>Sessions</span>
+          <div class="d-flex align-items-center gap-2">
+            <input id="mainQuickFilter" class="form-control form-control-sm" type="text" placeholder="Quick filter" />
+            <div class="btn-group btn-group-sm me-2" role="group" aria-label="View Presets">
+              <input type="radio" class="btn-check" name="viewPreset" id="viewPresetSimple" autocomplete="off">
+              <label class="btn btn-outline-secondary" for="viewPresetSimple">Simple</label>
+              <input type="radio" class="btn-check" name="viewPreset" id="viewPresetDefault" autocomplete="off" checked>
+              <label class="btn btn-outline-secondary" for="viewPresetDefault">Default</label>
+              <input type="radio" class="btn-check" name="viewPreset" id="viewPresetFull" autocomplete="off">
+              <label class="btn btn-outline-secondary" for="viewPresetFull">Full</label>
+            </div>
+          <div class="d-flex align-items-center gap-3">
+            <div class="form-check form-switch m-0" title="Toggle between page-level scroll (auto height) and table-level scroll (fixed height)">
+              <input class="form-check-input" type="checkbox" id="pageScrollToggle" checked>
+              <label class="form-check-label" for="pageScrollToggle">Page scroll</label>
+            </div>
+            <div class="btn-group btn-group-sm" role="group" aria-label="Export">
+              <button id="mainExportCsv" class="btn btn-outline-secondary">CSV</button>
+              <button id="mainExportJson" class="btn btn-outline-secondary">JSON</button>
+              <button id="mainFullscreenBtn" class="btn btn-outline-secondary" title="Fullscreen">⛶</button>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="table"></div>
+        </div>
+      </div>
+
+      <div id="summaryCard" class="card d-none mt-3">
+        <div class="card-header d-flex align-items-center justify-content-between">
+          <span>Character Summary</span>
+          <small class="text-secondary">Non-interactive summary of XP and level</small>
+        </div>
+        <div class="card-body">
+          <div id="summarySimple" class="table-responsive">
+            <table id="summaryTable" class="table table-sm table-striped table-bordered mb-0">
+              <thead>
+                <tr>
+                  <th style="width: 40%">Character</th>
+                  <th style="width: 15%" class="text-end">XP</th>
+                  <th style="width: 15%" class="text-end">Level</th>
+                  <th style="width: 30%" class="text-end">Sessions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Filled dynamically by custom.js -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <link rel="stylesheet" href="/assets/custom.css" />
+    <script type="module" src="/assets/app.js" defer></script>
+    <script src="/assets/custom.js" defer></script>
+  </body>
+</html>
+

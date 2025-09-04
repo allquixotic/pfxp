@@ -1,0 +1,7 @@
+[test]
+# Don't need test runner for this project
+preload = []
+
+[dev]
+# Development settings
+jsx = "react"
