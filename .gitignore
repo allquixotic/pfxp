@@ -38,6 +38,9 @@ public/assets/fuse-*.js
 public/assets/fuse-*.js.map
 public/assets/fuse.esm-*.js
 
+# Generated build metadata
+src/build-info.ts
+
 # caches
 .eslintcache
 .cache

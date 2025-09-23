@@ -3,6 +3,7 @@
 import { createGrid, ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 import localforage from 'localforage';
 import { DateTime } from 'luxon';
+import { BUILD_ID, BUILD_TIMESTAMP } from '../build-info';
 
 // Register all Community modules (simplest, resolves AG Grid #272)
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -17,6 +18,16 @@ import 'ag-grid-community/styles/ag-theme-quartz.css';
 
 // App styles (extracted from index.html)
 import './styles.css';
+
+declare global {
+  interface Window {
+    PFXP_BUILD_ID?: string;
+    PFXP_BUILD_TIMESTAMP?: string;
+  }
+}
+
+window.PFXP_BUILD_ID = BUILD_ID;
+window.PFXP_BUILD_TIMESTAMP = BUILD_TIMESTAMP;
 
 // State and DOM refs (migrated from inline script)
 const state: any = {
@@ -33,6 +44,7 @@ const state: any = {
   summaryGridApi: null,
   summaryFuse: null,
   summaryFilters: [],
+  pageScrollListenerAttached: false,
 };
 
 const statusEl = document.getElementById('statusAlert') as HTMLElement;
@@ -49,6 +61,7 @@ const mainExportCsvBtn = document.getElementById('mainExportCsv') as HTMLButtonE
 const mainExportJsonBtn = document.getElementById('mainExportJson') as HTMLButtonElement;
 const mainFullscreenBtn = document.getElementById('mainFullscreenBtn') as HTMLButtonElement;
 const mainQuickFilter = document.getElementById('mainQuickFilter') as HTMLInputElement;
+const pageScrollToggle = document.getElementById('pageScrollToggle') as HTMLInputElement;
 
 // View preset buttons
 const viewPresetSimpleBtn = document.getElementById('viewPresetSimple') as HTMLInputElement;
@@ -56,7 +69,7 @@ const viewPresetDefaultBtn = document.getElementById('viewPresetDefault') as HTM
 const viewPresetFullBtn = document.getElementById('viewPresetFull') as HTMLInputElement;
 
 const VIEW_PRESETS = {
-  simple: ['date', 'character.name', 'gameSystem', 'scenario', 'xp', 'notes'],
+  simple: ['date', 'character.name', 'effectiveLevel', 'gameSystem', 'scenario', 'xp', 'notes'],
   default: [
     'date', 'character.name', 'effectiveLevel', 'gameSystem', 'scenario', 'xp', 'gm', 'event.name', 'faction.name', 'notes'
   ],
@@ -67,13 +80,26 @@ async function applyViewPreset(presetName: 'simple' | 'default' | 'full' | 'cust
   if (!state.gridApi) return;
 
   const colIds = VIEW_PRESETS[presetName as keyof typeof VIEW_PRESETS];
-  const allCols = state.gridApi.getColumns().map((c: any) => c.getColId());
+  const cols = state.gridColumnApi.getColumns?.() ?? [];
+  const allCols = cols.map((c: any) => c.getColId());
+
+  const applyState = (ids: string[], visible: boolean) => {
+    if (!ids.length) return;
+    if (state.gridColumnApi.applyColumnState) {
+      state.gridColumnApi.applyColumnState({
+        state: ids.map((id) => ({ colId: id, hide: !visible })),
+        applyOrder: false,
+      });
+    } else if (state.gridColumnApi.setColumnsVisible) {
+      state.gridColumnApi.setColumnsVisible(ids, visible);
+    }
+  };
 
   if (colIds) {
-    state.gridApi.setColumnsVisible(allCols, false);
-    state.gridApi.setColumnsVisible(colIds, true);
+    applyState(allCols, false);
+    applyState(colIds, true);
   } else if (presetName === 'full') {
-    state.gridApi.setColumnsVisible(allCols, true);
+    applyState(allCols, true);
   }
 
   // Update button state
@@ -165,7 +191,9 @@ function initTooltips() {
 const storage = localforage.createInstance({ name: 'pfxp' });
 async function saveColumnState(prefix: string, columnApi: any) {
   try {
-    const st = columnApi.getColumnState();
+    const getState = columnApi.getColumnState?.bind(columnApi);
+    if (!getState) return;
+    const st = getState();
     await storage.setItem('ag:layout:' + prefix, st);
   } catch {}
 }
@@ -243,7 +271,20 @@ function mainColumnDefs() {
     makeCol('Character ID', 'player.charid'),
     makeCol('Faction', 'faction.name'),
     makeCol('Prestige', 'prestigeReputation.prestigePoints', { filter: 'agNumberColumnFilter' }),
-    { headerName: 'GM?', colId: 'prestigeReputation.isGM', sortable: true, resizable: true, filter: 'agTextColumnFilter', valueGetter: (p: any) => p.data?.prestigeReputation?.isGM ?? false },
+    {
+      headerName: 'GM?',
+      colId: 'prestigeReputation.isGM',
+      sortable: true,
+      resizable: true,
+      filter: 'agTextColumnFilter',
+      valueGetter: (p: any) => {
+        if (p.node.isRowPinned?.() || p.data?.isPinnedSummary) return '';
+        const flag = p.data?.prestigeReputation?.isGM;
+        if (flag === true) return 'Yes';
+        if (flag === false) return 'No';
+        return '';
+      },
+    },
     makeCol('Notes', 'notes')
   ];
 }
@@ -311,6 +352,7 @@ function buildMainGrid(details: any[]) {
 
   const gridOptions: any = {
     theme: 'legacy',
+    domLayout: pageScrollToggle?.checked ? 'autoHeight' : 'normal',
     defaultColDef: { sortable: true, filter: true, resizable: true },
     columnDefs: mainColumnDefs(),
     rowData: details,
@@ -330,16 +372,24 @@ function buildMainGrid(details: any[]) {
   };
 
   state.gridApi = createGrid(gridDiv, gridOptions);
-  state.gridColumnApi = state.gridApi;
+  state.gridColumnApi = state.gridApi?.getColumnApi?.() || state.gridApi;
+  syncDomLayoutWithToggle();
+  if (!state.pageScrollListenerAttached && pageScrollToggle) {
+    pageScrollToggle.addEventListener('change', () => {
+      syncDomLayoutWithToggle();
+      sizeGrids();
+    });
+    state.pageScrollListenerAttached = true;
+  }
 
   loadColumnState('pfxp:main').then((st) => {
-    if (st) {
-      try { state.gridApi.setColumnState(st); } catch {}
+    if (st && state.gridColumnApi.applyColumnState) {
+      try { state.gridColumnApi.applyColumnState({ state: st, applyOrder: true }); } catch {}
     }
   });
 
   const persist = () => {
-    saveColumnState('pfxp:main', state.gridApi);
+    saveColumnState('pfxp:main', state.gridColumnApi);
     // Deselect presets if user customizes columns
     viewPresetSimpleBtn.checked = false;
     viewPresetDefaultBtn.checked = false;
@@ -354,10 +404,11 @@ function buildMainGrid(details: any[]) {
   attachHeaderVisibilityMenu('#table', state.gridApi);
 }
 
-function attachHeaderVisibilityMenu(containerSelector: string, api: any) {
+function attachHeaderVisibilityMenu(containerSelector: string, apiLike: any) {
   const container = document.querySelector(containerSelector) as HTMLElement | null;
   const header = container?.querySelector('.ag-header') as HTMLElement | null;
   let menuDiv: HTMLDivElement | null = null;
+  const columnApi = apiLike?.getColumnApi?.() || apiLike;
   header?.addEventListener('click', (e) => {
     if (!(e.target instanceof HTMLElement)) return;
     const isHeader = !!e.target.closest('.ag-header-cell');
@@ -378,7 +429,7 @@ function attachHeaderVisibilityMenu(containerSelector: string, api: any) {
     const list = document.createElement('div');
     menuDiv.appendChild(list);
 
-    const cols = api.getColumns ? api.getColumns() : api.getAllGridColumns?.();
+    const cols = columnApi.getColumns ? columnApi.getColumns() : columnApi.getAllGridColumns?.();
     const columns = cols || [];
     const checkboxes: { cb: HTMLInputElement, colId: string }[] = [];
 
@@ -393,17 +444,30 @@ function attachHeaderVisibilityMenu(containerSelector: string, api: any) {
       list.appendChild(wrap);
       const cb = wrap.querySelector('input') as HTMLInputElement;
       checkboxes.push({ cb, colId });
-      cb.addEventListener('change', () => { api.setColumnVisible(colId, cb.checked); saveColumnState(containerSelector.includes('summary') ? 'pfxp:summary' : 'pfxp:main', api); });
+      cb.addEventListener('change', () => {
+        const target = columnApi.applyColumnState ? columnApi : state.gridColumnApi;
+        if (target?.applyColumnState) {
+          target.applyColumnState({ state: [{ colId, hide: !cb.checked }], applyOrder: false });
+        } else if (target?.setColumnVisible) {
+          target.setColumnVisible(colId, cb.checked);
+        }
+        saveColumnState(containerSelector.includes('summary') ? 'pfxp:summary' : 'pfxp:main', target || columnApi);
+      });
     });
 
     const allCb = menuDiv.querySelector('#' + allToggleId) as HTMLInputElement;
     allCb.addEventListener('change', () => {
       const on = allCb.checked;
+      const target = columnApi.applyColumnState ? columnApi : state.gridColumnApi;
       checkboxes.forEach(({ cb, colId }) => {
-        api.setColumnVisible(colId, on);
+        if (target?.applyColumnState) {
+          target.applyColumnState({ state: [{ colId, hide: !on }], applyOrder: false });
+        } else if (target?.setColumnVisible) {
+          target.setColumnVisible(colId, on);
+        }
         cb.checked = on;
       });
-      saveColumnState(containerSelector.includes('summary') ? 'pfxp:summary' : 'pfxp:main', api);
+      saveColumnState(containerSelector.includes('summary') ? 'pfxp:summary' : 'pfxp:main', target || columnApi);
     });
 
     document.body.appendChild(menuDiv);
@@ -417,6 +481,46 @@ window.addEventListener('resize', () => { updateScale(); sizeGrids(); clampSaved
 
 function sizeGrids() {
   try { state.gridApi?.sizeColumnsToFit(); } catch {}
+}
+
+function syncDomLayoutWithToggle() {
+  if (!state.gridApi) return;
+  const isPageScroll = !!pageScrollToggle?.checked;
+  const layout = isPageScroll ? 'autoHeight' : 'normal';
+  try {
+    state.gridApi.setGridOption('domLayout', layout);
+  } catch {
+    try { (state.gridApi as any).setDomLayout?.(layout); } catch {}
+  }
+  const wasPageScroll = document.body.classList.contains('page-scroll-mode');
+  document.body.classList.toggle('page-scroll-mode', isPageScroll);
+  document.body.classList.toggle('table-scroll-mode', !isPageScroll);
+
+  const tableCard = document.getElementById('tableCard') as HTMLElement | null;
+  if (tableCard) {
+    if (isPageScroll) {
+      if (!wasPageScroll) {
+        if (!(tableCard as any).dataset.tableScrollHeight && tableCard.style.height) {
+          (tableCard as any).dataset.tableScrollHeight = tableCard.style.height;
+        }
+        if (!(tableCard as any).dataset.tableScrollFlex && tableCard.style.flex) {
+          (tableCard as any).dataset.tableScrollFlex = tableCard.style.flex;
+        }
+      }
+      tableCard.style.height = '';
+      tableCard.style.flex = '';
+    } else if (wasPageScroll) {
+      const h = (tableCard as any).dataset.tableScrollHeight || '';
+      const flex = (tableCard as any).dataset.tableScrollFlex || '';
+      if (h) tableCard.style.height = h; else tableCard.style.height = '';
+      if (flex) tableCard.style.flex = flex; else tableCard.style.flex = '';
+      if (!tableCard.style.height) {
+        void applySavedHeights();
+      }
+    }
+  }
+
+  if (!isPageScroll) sizeGrids();
 }
 
 // Previous Runs persistence
@@ -513,6 +617,7 @@ async function presentData(doc: any, opts = { fromFile: false }) {
     await loadViewPreset(); // Apply after grid is built
   } else {
     state.gridApi.setGridOption('rowData', doc.details);
+    syncDomLayoutWithToggle();
   }
   updateSuggestions(doc.details);
   state.fuse = null;
@@ -864,6 +969,13 @@ refreshBtn.addEventListener('click', async () => {
 
 // Initialize after page load
 document.addEventListener('DOMContentLoaded', async () => {
+  const badge = document.getElementById('appBuildId') as HTMLElement | null;
+  if (badge) {
+    badge.textContent = BUILD_ID;
+    badge.setAttribute('title', `Build ${BUILD_ID} (${BUILD_TIMESTAMP})`);
+    badge.classList.remove('d-none');
+  }
+
   initTooltips();
   updateScale();
   sizeGrids();
@@ -1008,8 +1120,12 @@ async function applySavedHeights() {
   const mh = await storage.getItem('height:pfxp:main') as number | null;
   if (mh && main) {
     const h = Math.min(Math.max(mh, minCardHeight(main, '#table')), maxCardHeight(main));
-    main.style.height = h + 'px';
-    main.style.flex = '0 0 ' + h + 'px';
+    (main as any).dataset.tableScrollHeight = h + 'px';
+    (main as any).dataset.tableScrollFlex = '0 0 ' + h + 'px';
+    if (!pageScrollToggle?.checked) {
+      main.style.height = h + 'px';
+      main.style.flex = '0 0 ' + h + 'px';
+    }
   }
   sizeGrids();
 }
