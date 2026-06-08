@@ -119,18 +119,18 @@ async function getCurrentPublicJwk() {
   return { keyId: entry.id, jwk, expiresAt: entry.expiresAt };
 }
 
-function b64ToUint8(b64: string): Uint8Array {
+function b64ToArrayBuffer(b64: string): ArrayBuffer {
   const buf = Buffer.from(b64, 'base64');
-  const out = new Uint8Array(buf.length);
-  out.set(buf);
-  return out;
+  const bytes = new Uint8Array(new ArrayBuffer(buf.length));
+  bytes.set(buf);
+  return bytes.buffer;
 }
 
 async function decryptCredential(payload: { keyId: string; ciphertext: string }): Promise<string> {
   const entry = keyStore.get(payload.keyId);
   if (!entry) throw new Error('Invalid keyId');
-  const bytes = b64ToUint8(payload.ciphertext);
-  const pt = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, entry.privateKey, bytes);
+  const ciphertext = b64ToArrayBuffer(payload.ciphertext);
+  const pt = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, entry.privateKey, ciphertext);
   return new TextDecoder().decode(pt);
 }
 

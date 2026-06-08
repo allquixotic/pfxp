@@ -63,7 +63,7 @@ export class PaizoScraper {
 
     this.initPromise = (async () => {
       // Attempt to launch browsers up to maxBrowsers, round-robin across engines
-      const engines = this.preferredEngines.length > 0 ? this.preferredEngines : ['firefox'];
+      const engines: EngineName[] = this.preferredEngines.length > 0 ? [...this.preferredEngines] : ['firefox'];
       let launched = 0;
       let attempts = 0;
       const maxAttempts = Math.max(this.maxBrowsers, engines.length) * 2; // some slack in case of failures
@@ -88,7 +88,8 @@ export class PaizoScraper {
           const msg = err?.message ? String(err.message) : String(err);
           console.warn(`[scraper] Failed to launch ${engine}: ${msg}`);
           // Rotate engine order to avoid repeatedly failing the same one
-          this.preferredEngines = engines.filter((e) => e !== engine).concat(engine);
+          const remaining = engines.filter((e) => e !== engine) as EngineName[];
+          this.preferredEngines = [...remaining, engine];
           if (this.preferredEngines.length === 0) break;
         }
       }
@@ -118,9 +119,30 @@ export class PaizoScraper {
   }
 
   private async launchEngine(engine: EngineName): Promise<Browser> {
-    const common = { headless: !this.headed } as const;
+    // For headless environments without X11, ensure proper configuration
+    const launchOptions: any = {
+      headless: !this.headed,
+      firefoxUserPrefs: {
+        'toolkit.startup.max_resumed_crashes': -1,
+        // Disable crash reporting and telemetry which can cause issues in containers
+        'toolkit.telemetry.reportingpolicy.firstRun': false,
+        'datareporting.healthreport.uploadEnabled': false,
+        'datareporting.healthreport.service.enabled': false,
+        'datareporting.policy.dataSubmissionEnabled': false,
+      },
+      // Set environment variables to ensure Firefox runs without needing X11
+      env: {
+        ...process.env,
+        MOZ_HEADLESS: '1',
+        // Disable GPU acceleration which can cause issues in containers
+        MOZ_WEBRENDER: '0',
+        // Force software rendering
+        MOZ_ACCELERATED: '0',
+      }
+    };
+
     // Always launch Firefox
-    return firefox.launch(common);
+    return firefox.launch(launchOptions);
   }
 
   async close() {

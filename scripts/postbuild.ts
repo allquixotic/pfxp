@@ -10,6 +10,8 @@ const root = path.resolve(import.meta.dir, '..');
 const publicDir = path.join(root, 'public');
 const assetsDir = path.join(publicDir, 'assets');
 const htmlPath = path.join(publicDir, 'index.html');
+const appJsRef = /\/assets\/app(?:\.[0-9a-fA-F]{8,})?\.js\b/g;
+const appCssRef = /\/assets\/app(?:\.[0-9a-fA-F]{8,})?\.css\b/g;
 
 async function hashFile(filePath: string) {
   const buf = await fs.readFile(filePath);
@@ -26,10 +28,7 @@ async function replaceInFile(filePath: string, replacer: (s: string) => string) 
 async function main() {
   // Reset mode: restore index.html to un-hashed asset paths for dev
   if (process.env.RESET === '1') {
-    await replaceInFile(htmlPath, (s) => s
-      .replace(/\/assets\/app\.[0-9a-fA-F]{8,}\.js\b/g, '/assets/app.js')
-      .replace(/\/assets\/app\.[0-9a-fA-F]{8,}\.css\b/g, '/assets/app.css')
-    );
+    await replaceInFile(htmlPath, (s) => s.replace(appJsRef, '/assets/app.js').replace(appCssRef, '/assets/app.css'));
     console.log('Postbuild reset: restored index.html to un-hashed asset paths');
     return;
   }
@@ -73,12 +72,8 @@ async function main() {
   // Inject into index.html
   await replaceInFile(htmlPath, (s) => {
     let out = s;
-    if (newJsName) {
-      out = out.replace(/\/assets\/app\.js\b/g, `/assets/${newJsName}`);
-    }
-    if (newCssName) {
-      out = out.replace(/\/assets\/app\.css\b/g, `/assets/${newCssName}`);
-    }
+    if (newJsName) out = out.replace(appJsRef, `/assets/${newJsName}`);
+    if (newCssName) out = out.replace(appCssRef, `/assets/${newCssName}`);
     return out;
   });
 

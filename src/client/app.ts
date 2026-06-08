@@ -729,7 +729,7 @@ async function getPublicKey() {
   keyCache = { keyId: data.keyId, expiresAt: data.expiresAt, publicKey: key };
   return keyCache;
 }
-function abToB64(buf: ArrayBuffer) { const bytes = new Uint8Array(buf); let binary = ''; for (let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]); return btoa(binary); }
+function abToB64(buf: ArrayBuffer) { const bytes = new Uint8Array(buf); let binary = ''; for (let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]!); return btoa(binary); }
 async function encryptPassword(plain: string) { const { keyId, publicKey } = await getPublicKey(); const enc = new TextEncoder().encode(plain); const ct = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, publicKey, enc); return { keyId, ciphertext: abToB64(ct) }; }
 
 // HTTP helper
