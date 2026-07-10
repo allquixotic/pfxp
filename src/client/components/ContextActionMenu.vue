@@ -209,6 +209,22 @@ function pointEvent(
   return new MouseEvent('contextmenu', { clientX, clientY });
 }
 
+function focusableContextTarget(element: HTMLElement | null): HTMLElement | null {
+  if (!element) return null;
+  return element.closest<HTMLElement>([
+    '.ag-cell',
+    '.ag-header-cell',
+    '.q-item[tabindex]',
+    'button',
+    'a[href]',
+    'input',
+    'select',
+    'textarea',
+    '[contenteditable="true"]',
+    '[tabindex]',
+  ].join(',')) ?? element;
+}
+
 function addViewportListeners(): void {
   if (listenersAttached) return;
   listenersAttached = true;
@@ -285,9 +301,9 @@ function open(event: Event, trigger: ContextMenuTrigger = 'pointer'): void {
 
   const activeElement = document.activeElement;
   const eventTarget = event.target instanceof HTMLElement ? event.target : null;
-  const sourceElement = trigger === 'keyboard'
+  const sourceElement = focusableContextTarget(trigger === 'keyboard'
     ? activeElement instanceof HTMLElement ? activeElement : eventTarget
-    : eventTarget;
+    : eventTarget);
   returnFocus = sourceElement?.isConnected ? sourceElement : null;
   fallbackFocus = activeElement instanceof HTMLElement ? activeElement : null;
   shouldRestoreFocus = true;
