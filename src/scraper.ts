@@ -4,6 +4,10 @@ import { cpus } from 'os';
 import type { Character, SessionDetail, PaizoOrganizedPlayData } from './types';
 import { isAlreadyPlayedSessionNote } from './session-rules';
 import { createPaizoAccountIdentity } from './account';
+import {
+  sanitizeGmRecognitions,
+  type GmRecognitionBlock,
+} from './gm-recognition';
 
 // Engine names we launch (Firefox-only)
 type EngineName = 'firefox';
@@ -288,6 +292,10 @@ export class PaizoScraper {
       update('parsing:characters');
       const characters = await this.parseCharacters(page);
 
+      // Preserve only the small, bounded GM-recognition shape from the player page.
+      update('parsing:gm-recognitions');
+      const gmRecognitions = await this.parseGmRecognitions(page);
+
       // Navigate to sessions page (with access error handling)
       update('navigating:sessions');
       await this.navigateWithAccessRetry(page, 'https://paizo.com/cgi-bin/WebObjects/Store.woa/wa/browse?path=organizedPlay/myAccount/allsessions#tabs');
@@ -301,7 +309,13 @@ export class PaizoScraper {
       const summary = this.calculateSummary(details);
 
       update('done');
-      return { account: createPaizoAccountIdentity(task.email), characters, details, summary };
+      return {
+        account: createPaizoAccountIdentity(task.email),
+        ...(gmRecognitions.length ? { gmRecognitions } : {}),
+        characters,
+        details,
+        summary,
+      };
     } catch (err: any) {
       // Log full Playwright error details to stderr and keep the page alive for inspection
       console.error(err?.stack || err);
@@ -383,6 +397,48 @@ export class PaizoScraper {
     }
 
     return characters;
+  }
+
+  private async parseGmRecognitions(page: Page): Promise<GmRecognitionBlock[]> {
+    const candidates = await page.locator('p').evaluateAll((paragraphs) => {
+      const encodeNode = (node: Node): unknown => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          return { type: 'text', text: node.textContent ?? '' };
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return { type: 'unsupported' };
+
+        const element = node as Element;
+        const tag = element.tagName.toLocaleLowerCase('en-US');
+        if (tag === 'span') {
+          return {
+            type: 'span',
+            classes: [...element.classList],
+            children: [...element.childNodes].map(encodeNode),
+          };
+        }
+        if (tag === 'img') {
+          const image = element as HTMLImageElement;
+          const width = Number.parseInt(element.getAttribute('width') ?? '', 10);
+          const height = Number.parseInt(element.getAttribute('height') ?? '', 10);
+          return {
+            type: 'img',
+            src: image.src,
+            alt: element.getAttribute('alt') ?? '',
+            ...(Number.isFinite(width) ? { width } : {}),
+            ...(Number.isFinite(height) ? { height } : {}),
+          };
+        }
+        return { type: 'unsupported', tag };
+      };
+
+      return paragraphs
+        .filter((paragraph) => /^\s*You are an?\s+[\s\S]+\s+GM\.\s*$/iu.test(paragraph.textContent ?? ''))
+        .slice(0, 16)
+        .map((paragraph) => ({
+          nodes: [...paragraph.childNodes].map(encodeNode),
+        }));
+    });
+    return sanitizeGmRecognitions(candidates);
   }
 
   private async hasAccessError(page: Page): Promise<boolean> {

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { firefox, type Browser, type Page } from 'playwright';
 import { PaizoScraper } from './scraper';
 import type { Character, SessionDetail } from './types';
+import { gmRecognitionPlainText, type GmRecognitionBlock } from './gm-recognition';
 
 let browser: Browser;
 
@@ -81,6 +82,47 @@ test('session parser reads plain-text scenarios and keeps already-played rows at
       'PFS(2ed) #7-15: Within Antiquated Halls',
     ]);
     expect(sessions.map((session) => session.xp)).toEqual([4, 0, 4]);
+  } finally {
+    await page.close();
+  }
+});
+
+test('GM recognition parser keeps glyph markup and rejects ad-like content', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(`
+      <main>
+        <p>
+          You are a
+          <span class="referenceable"><span class="stars">
+            <img border="0" alt="*" height="25"
+              src="https://paizo.com/image/content/OrganizedPlay/PFS2GlyphIcon_500.png"
+              width="24">
+            <img border="0" alt="*" height="25"
+              src="https://paizo.com/image/content/OrganizedPlay/PFS2GlyphIcon_500.png"
+              width="24">
+          </span></span>
+          Pathfinder Society (second edition) GM.
+        </p>
+        <p>
+          You are a <a href="https://paizo.com/advertisement"><img
+            src="https://paizo.com/image/content/OrganizedPlay/banner.png"></a>
+          Pathfinder Society GM.
+        </p>
+      </main>`);
+
+    const scraper = new PaizoScraper({ maxBrowsers: 1 });
+    const parseGmRecognitions = (
+      scraper as unknown as {
+        parseGmRecognitions(page: Page): Promise<GmRecognitionBlock[]>;
+      }
+    ).parseGmRecognitions.bind(scraper);
+
+    const blocks = await parseGmRecognitions(page);
+    expect(blocks).toHaveLength(1);
+    expect(gmRecognitionPlainText(blocks[0]!)).toBe(
+      'You are a Pathfinder Society (second edition) GM.',
+    );
   } finally {
     await page.close();
   }

@@ -1,4 +1,5 @@
 import type { PaizoAccountIdentity } from './account';
+import type { GmRecognitionBlock } from './gm-recognition';
 
 // Character model from the characters page
 export interface Character {
@@ -50,6 +51,7 @@ export interface CharacterSummary {
 // Complete data structure
 export interface PaizoOrganizedPlayData {
   account?: PaizoAccountIdentity;
+  gmRecognitions?: GmRecognitionBlock[];
   details: SessionDetail[];
   characters: Character[];
   summary: Record<string, CharacterSummary>;

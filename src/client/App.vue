@@ -10,6 +10,7 @@ import WelcomePanel from './components/WelcomePanel.vue';
 import MobileSessions from './components/MobileSessions.vue';
 import SessionDetailDialog from './components/SessionDetailDialog.vue';
 import ContextActionMenu from './components/ContextActionMenu.vue';
+import GmRecognitions from './components/GmRecognitions';
 import type { ContextMenuAction, ContextMenuTrigger } from './components/context-menu-model';
 import FilterDrawer, {
   type CombineMode,
@@ -1087,22 +1088,27 @@ onBeforeUnmount(() => {
       </div>
 
       <template v-else>
-        <div class="pfxp-tabs-wrap">
-          <div class="pfxp-active-run" aria-label="Loaded run">
-            <div><q-icon name="r_history" /><strong>{{ activeRunEntry?.label ?? (activeSource === 'fetch' ? 'Paizo account fetch' : 'Loaded data') }}</strong><span v-if="activeAccountEmail">{{ activeAccountEmail }}</span></div>
-            <time v-if="activeRunEntry" :datetime="new Date(activeRunEntry.ts).toISOString()">{{ formatHistoryDate(activeRunEntry.ts) }}</time>
+        <div class="pfxp-workspace-shell">
+          <div class="pfxp-tabs-wrap">
+            <div class="pfxp-active-run" aria-label="Loaded run">
+              <div><q-icon name="r_history" /><strong>{{ activeRunEntry?.label ?? (activeSource === 'fetch' ? 'Paizo account fetch' : 'Loaded data') }}</strong><span v-if="activeAccountEmail">{{ activeAccountEmail }}</span></div>
+              <time v-if="activeRunEntry" :datetime="new Date(activeRunEntry.ts).toISOString()">{{ formatHistoryDate(activeRunEntry.ts) }}</time>
+            </div>
+            <GmRecognitions
+              v-if="documentData.gmRecognitions?.length"
+              :blocks="documentData.gmRecognitions"
+            />
+            <q-tabs v-model="activeTab" dense align="left" indicator-color="primary" active-color="primary" class="pfxp-tabs">
+              <q-tab name="sessions"><span>Sessions <span class="pfxp-tab-count">{{ documentData.details.length }}</span></span></q-tab>
+              <q-tab name="characters"><span>Characters <span class="pfxp-tab-count">{{ summaries.length }}</span></span></q-tab>
+            </q-tabs>
           </div>
-          <q-tabs v-model="activeTab" dense align="left" indicator-color="primary" active-color="primary" class="pfxp-tabs">
-            <q-tab name="sessions"><span>Sessions <span class="pfxp-tab-count">{{ documentData.details.length }}</span></span></q-tab>
-            <q-tab name="characters"><span>Characters <span class="pfxp-tab-count">{{ summaries.length }}</span></span></q-tab>
-          </q-tabs>
-        </div>
 
-        <main
-          ref="workspacePage"
-          class="pfxp-page"
-          :class="{ 'pfxp-page--fullscreen': fullscreen }"
-        >
+          <main
+            ref="workspacePage"
+            class="pfxp-page"
+            :class="{ 'pfxp-page--fullscreen': fullscreen }"
+          >
           <div v-if="busy" class="pfxp-progress" role="status" aria-live="polite">
             <div class="pfxp-progress__copy"><strong>{{ progressMessage }}</strong><span v-if="scrapeState?.progress?.percent != null">{{ scrapeState.progress.percent }}%</span></div>
             <q-linear-progress rounded color="primary" :indeterminate="!progressPercent" :value="progressPercent" />
@@ -1251,7 +1257,8 @@ onBeforeUnmount(() => {
           </template>
 
           <CharacterSummary v-else :rows="summaries" :dark="darkActive" @select="onCharacterSelected" />
-        </main>
+          </main>
+        </div>
       </template>
     </q-page-container>
 

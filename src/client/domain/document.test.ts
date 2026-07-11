@@ -8,6 +8,7 @@ import {
   validatePfxpDocument,
 } from './document';
 import type { PfxpDocument, SessionDetail } from './models';
+import type { GmRecognitionBlock } from '../../gm-recognition';
 
 function session(overrides: Partial<SessionDetail> = {}): SessionDetail {
   return {
@@ -74,6 +75,46 @@ describe('PFXP document domain', () => {
     ]);
     expect(parsed.details.map((detail) => detail.xp)).toEqual([4, 0, 4]);
     expect(parsed.summary).toEqual({ Echo: { xp: 8 } });
+  });
+
+  test('keeps safe GM recognition blocks, omits unsafe blocks, and accepts legacy runs', () => {
+    const safeBlock: GmRecognitionBlock = {
+      nodes: [
+        { type: 'text', text: 'You are a ' },
+        {
+          type: 'span',
+          classes: ['referenceable'],
+          children: [{
+            type: 'img',
+            src: 'https://paizo.com/image/content/OrganizedPlay/PFS2GlyphIcon_500.png',
+            alt: '*',
+            width: 24,
+            height: 25,
+          }],
+        },
+        { type: 'text', text: ' Pathfinder Society (second edition) GM.' },
+      ],
+    };
+    const parsed = parsePfxpDocument({
+      characters: [],
+      details: [],
+      summary: {},
+      gmRecognitions: [
+        safeBlock,
+        {
+          nodes: [
+            { type: 'text', text: 'You are a ' },
+            { type: 'script', text: 'alert(1)' },
+            { type: 'text', text: ' Pathfinder Society GM.' },
+          ],
+        },
+      ],
+    });
+    expect(parsed.gmRecognitions).toEqual([safeBlock]);
+    expect(parsed.gmRecognitions?.[0]).not.toBe(safeBlock);
+
+    const legacy = parsePfxpDocument({ characters: [], details: [], summary: {} });
+    expect(legacy.gmRecognitions).toBeUndefined();
   });
 
   test('returns paths for malformed nested data', () => {

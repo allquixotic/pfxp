@@ -12,6 +12,7 @@ import {
 } from './models';
 import { isAlreadyPlayedSessionNote } from '../../session-rules';
 import { createPaizoAccountIdentity, type PaizoAccountIdentity } from '../../account';
+import { sanitizeGmRecognitions } from '../../gm-recognition';
 
 const gameSystems = new Set<string>(GAME_SYSTEMS);
 
@@ -238,8 +239,10 @@ export function validatePfxpDocument(input: unknown): ValidationResult<PfxpDocum
     : session);
   const summary = readLegacySummary(reader, reader.required(root, 'summary', '$'), '$.summary');
   const account = readAccount(reader, root.account, '$.account');
+  const gmRecognitions = sanitizeGmRecognitions(root.gmRecognitions);
   const value: PfxpDocument = {
     ...(account ? { account } : {}),
+    ...(gmRecognitions.length ? { gmRecognitions } : {}),
     characters: rawCharacters.map((item, index) =>
       readCharacter(reader, item, `$.characters[${index}]`),
     ),

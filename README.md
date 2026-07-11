@@ -14,6 +14,7 @@ A Bun + TypeScript web app that calculates Paizo Organized Play XP and presents 
   - Fuzzy search filtering with AND/OR logic and search suggestions
   - Account-scoped Previous Runs history that retains every imported or fetched result and opens the newest run at startup
   - Runtime switching between canonicalized Paizo account identities without discarding another account's history
+  - Paizo GM glyph/nova-style recognition copied into each run as sanitized structured text and images, then shown beneath the loaded-run label
   - CSV, JSON, and Excel XLSX export; table exports contain the currently visible columns and filtered/sorted rows
   - File loader to visualize previously saved JSON from disk
   - Responsive desktop grids and ergonomic mobile card views with compact display formatting
@@ -88,6 +89,7 @@ dotenvx run -- bun run src/cli.ts [output.json] [--headed]
 - CSV and Excel XLSX exports contain the current filtered/sorted rows and visible columns; JSON exports preserve the complete run document.
 - Every table view is persisted independently in IndexedDB and restored across reloads, including the active table.
 - Account-scoped run history retains all fetched and imported runs and automatically opens the chronologically newest run at startup.
+- GM recognition from the Paizo player page persists with each run. Rendering uses a bounded structured `p`/`span`/`img` model instead of raw HTML; images are limited to Paizo's HTTPS Organized Play image tree.
 - Paizo account identities are canonicalized case-insensitively while preserving distinct `+` aliases, and accounts can be switched without losing run history.
 - Rows whose notes start with “player has already played” remain visible, receive zero XP, and are styled gray; a filter can exclude every zero-XP event.
 - Character effective levels use reduced ASCII fractions, such as `4 5/12` or `2 1/2`.

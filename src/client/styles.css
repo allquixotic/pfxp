@@ -119,8 +119,16 @@ textarea {
   text-transform: none;
 }
 
+.pfxp-workspace-shell {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--pfxp-header-height));
+  height: calc(100dvh - var(--pfxp-header-height));
+  min-height: 0;
+}
+
 .pfxp-tabs-wrap {
-  height: calc(var(--pfxp-tab-height) + var(--pfxp-run-height));
+  flex: 0 0 auto;
   padding: 0 14px;
   background: var(--pfxp-surface);
   border-bottom: 1px solid var(--pfxp-border);
@@ -160,6 +168,33 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+.pfxp-gm-recognitions {
+  display: grid;
+  padding: 0 0 8px 23px;
+  gap: 3px;
+}
+
+.pfxp-gm-recognition {
+  min-height: 25px;
+  margin: 0;
+  color: var(--pfxp-text);
+  font-size: 12px;
+  line-height: 25px;
+}
+
+.pfxp-gm-recognition__span {
+  display: inline;
+}
+
+.pfxp-gm-recognition__image {
+  display: inline-block;
+  max-width: 96px;
+  max-height: 32px;
+  margin: 0 1px;
+  object-fit: contain;
+  vertical-align: middle;
+}
+
 .pfxp-tabs {
   width: max-content;
   height: var(--pfxp-tab-height);
@@ -191,8 +226,9 @@ textarea {
 
 .pfxp-page {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  height: calc(100vh - var(--pfxp-header-height) - var(--pfxp-tab-height) - var(--pfxp-run-height));
+  height: auto;
   min-height: 0;
   padding: 0;
   background: var(--pfxp-surface);
@@ -580,7 +616,7 @@ textarea {
   }
 
   .pfxp-page {
-    height: calc(100vh - var(--pfxp-header-height) - var(--pfxp-tab-height) - var(--pfxp-run-height));
+    height: auto;
   }
 
   .pfxp-active-run {
@@ -592,6 +628,10 @@ textarea {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .pfxp-gm-recognitions {
+    padding-left: 0;
   }
 
   .pfxp-toolbar {

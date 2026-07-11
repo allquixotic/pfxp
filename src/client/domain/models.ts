@@ -1,4 +1,5 @@
 import type { PaizoAccountIdentity } from '../../account';
+import type { GmRecognitionBlock } from '../../gm-recognition';
 
 /** Game systems emitted by the scraper and understood by the client. */
 export const GAME_SYSTEMS = [
@@ -62,6 +63,7 @@ export interface LegacyCharacterSummary {
 /** A complete, re-importable scraper result. */
 export interface PfxpDocument {
   account?: PaizoAccountIdentity;
+  gmRecognitions?: GmRecognitionBlock[];
   characters: Character[];
   details: SessionDetail[];
   summary: Record<string, LegacyCharacterSummary>;

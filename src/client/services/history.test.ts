@@ -66,6 +66,31 @@ describe('HistoryRepository', () => {
     });
   });
 
+  test('round-trips GM recognition blocks with a saved run', async () => {
+    const store = new MemoryStore();
+    const repository = new HistoryRepository({ store, makeId: () => 'glyph-run', now: () => 1 });
+    const value: PfxpDocument = {
+      ...document(1),
+      gmRecognitions: [{
+        nodes: [
+          { type: 'text', text: 'You are a ' },
+          {
+            type: 'img',
+            src: 'https://paizo.com/image/content/OrganizedPlay/PFS2GlyphIcon_500.png',
+            alt: '*',
+            width: 24,
+            height: 25,
+          },
+          { type: 'text', text: ' Pathfinder Society (second edition) GM.' },
+        ],
+      }],
+    };
+    await repository.add(value, 'fetch');
+    expect((await repository.load('glyph-run'))?.document.gmRecognitions).toEqual(
+      value.gmRecognitions,
+    );
+  });
+
   test('prunes blobs that fall beyond the configured cap', async () => {
     const store = new MemoryStore();
     let id = 0;

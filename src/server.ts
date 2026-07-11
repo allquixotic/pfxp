@@ -1,9 +1,10 @@
 import type { UserData, QueueItem, FetchRequest, FetchResponse, ProgressEvent } from './types';
 import { PaizoScraper } from './scraper';
+import { CONTENT_SECURITY_POLICY } from './content-security-policy';
 import { canonicalizePaizoEmail } from './account';
 
 // Security: strict Content Security Policy for all responses
-const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'";
+const CSP = CONTENT_SECURITY_POLICY;
 
 function jsonWithCsp(body: any, init?: { status?: number; headers?: HeadersInit }) {
   const baseHeaders: HeadersInit = {

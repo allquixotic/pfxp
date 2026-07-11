@@ -67,10 +67,15 @@ Source of truth: The TypeScript in `src/scraper.ts` and `src/server.ts` defines 
      - Starfinder 1e: 701-799
      - Pathfinder 1e: all others
 
-3) Navigate to sessions: `https://paizo.com/cgi-bin/WebObjects/Store.woa/wa/browse?path=organizedPlay/myAccount/allsessions#tabs`.
+3) Parse GM recognition from the player page:
+   - Find paragraph text shaped like `You are a … GM.` (or `You are an … GM.`).
+   - Preserve text, nested spans, and glyph/nova-style images as structured nodes; never persist or render raw HTML.
+   - Allow at most 8 bounded blocks. Images must be HTTPS URLs under a `paizo.com` host and `/image/content/OrganizedPlay/`; unsupported, malformed, oversized, or deeply nested blocks are omitted.
+
+4) Navigate to sessions: `https://paizo.com/cgi-bin/WebObjects/Store.woa/wa/browse?path=organizedPlay/myAccount/allsessions#tabs`.
    - Robustly handle intermittent access errors by backing off and retrying (`navigateWithAccessRetry`).
 
-4) Parse all sessions across pagination:
+5) Parse all sessions across pagination:
    - Use the visible `next >` link when present, with 10-second delays between page transitions.
    - Verify successful page navigation by checking pagination indicators.
    - For each page, collect rows with date, GM, scenario, points, event ID/name, session number, player/org/char IDs, character/faction, prestige/reputation, notes.
@@ -78,7 +83,7 @@ Source of truth: The TypeScript in `src/scraper.ts` and `src/server.ts` defines 
    - Skip rows only when the prestige/reputation cell itself is blank or an em dash.
    - Retain rows whose notes begin with "player has already played", force their XP reward to zero, and expose them to the UI's gray-row treatment and no-XP filter.
 
-5) Compute XP per row using game system-specific rules and aggregate per-character summaries:
+6) Compute XP per row using game system-specific rules and aggregate per-character summaries:
    - Bounty scenarios: 1 XP
    - Quest scenarios: prestige points as XP
    - Adventure Path scenarios: 12 XP
@@ -105,6 +110,7 @@ The exact selectors, checks, and waits used here match the implementation in `sr
 - Right-click on desktop and long-press on mobile expose contextual table and column actions.
 - Current-view CSV/XLSX exports preserve displayed column order and filtered/sorted row order.
 - Previous Runs retains every fetched or imported run, groups them by canonicalized Paizo account, and loads the newest run at startup.
+- Sanitized GM recognition is stored in the run document and rendered below its loaded-run label. Legacy runs without recognition remain valid.
 - Account switching is available at runtime. Account keys remove Unicode whitespace and fold case while preserving distinct `+` aliases.
 - Dark/light theme toggle switches Quasar colors and AG Grid Quartz color schemes.
 
