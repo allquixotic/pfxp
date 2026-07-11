@@ -6,16 +6,18 @@ A Bun + TypeScript web app that calculates Paizo Organized Play XP and presents 
 
 - Bun server written in TypeScript (see `index.ts` and `src/server.ts`).
 - Playwright-powered scraper (see `src/scraper.ts`) with a Firefox browser pool and an async scheduler for concurrent flows.
-- Client UI (see `public/index.html`) built with Bootstrap and Tabulator, featuring:
+- Client UI (see `src/client`) built with Vue 3, Quasar, and AG Grid Community, featuring:
   - Two interactive tables: detailed sessions and character summary with XP totals
-  - Column reordering, visibility toggling, and width resizing for both tables
-  - Horizontal scrolling when total column width exceeds viewport (tables use 'fitData' layout)
-  - Persistent layout (order, visibility, widths) saved to IndexedDB via localForage and restored on reload
-  - Fuzzy search filtering for both tables with AND/OR logic and search suggestions
-  - "Previous Runs" dropdown storing up to 25 unique results (by SHA-256 hash) from Fetch or file loads
+  - Matching search, filter, column, density, saved-view, export, and fullscreen controls for both tables
+  - Auto-fit column widths with manual overrides, drag reordering, visibility controls, sorting, and contextual right-click/long-press actions
+  - Persistent table state (order, visibility, widths, sort, filters, density, and active table) saved to IndexedDB via localForage
+  - Fuzzy search filtering with AND/OR logic and search suggestions
+  - Account-scoped Previous Runs history that retains every imported or fetched result and opens the newest run at startup
+  - Runtime switching between canonicalized Paizo account identities without discarding another account's history
+  - CSV, JSON, and Excel XLSX export; table exports contain the currently visible columns and filtered/sorted rows
   - File loader to visualize previously saved JSON from disk
-  - Dark/light theme toggle with automatic UI scaling based on viewport size
-  - Resizable table sections with persistent height preferences
+  - Responsive desktop grids and ergonomic mobile card views with compact display formatting
+  - Dark/light theme toggle
 - Client-side credential encryption using ephemeral RSA-OAEP-256 public keys served by the backend.
 
 ## Requirements
@@ -35,7 +37,7 @@ bunx playwright install firefox
 bun install
 ```
 
-We also vendor a small client-side storage helper (localForage) via CDN in the HTML and track it in the project dependencies:
+Client-side persistence is provided by the tracked localForage dependency:
 
 ```bash
 bun add localforage@latest
@@ -80,17 +82,16 @@ dotenvx run -- bun run src/cli.ts [output.json] [--headed]
 
 ## UI features
 
-- Two interactive Tabulator tables (sessions detail and character summary) with:
-  - Horizontal scrolling when columns exceed the viewport
-  - Column reordering, hiding/showing, and resizing with right-click menu on headers
-  - Persistent layouts (order, visibility, widths) saved to IndexedDB via localForage and restored on reload
-  - Independent fuzzy search filtering with AND/OR logic and autocomplete suggestions
-  - CSV and JSON export capabilities
-  - Layout reset functionality
-- "Previous Runs" history storing up to 25 unique results (by SHA-256 hash) from both API fetches and file loads
-- Resizable table sections with mouse drag handles and persistent height preferences
-- Dark/light theme toggle with improved contrast and automatic UI scaling
-- Character summary table showing total XP and effective level calculations per character per game system
+- Two AG Grid tables (session detail and character summary) with an identical power-user command surface.
+- Column reordering, hiding/showing, free resizing, auto-fit reset, sorting, advanced filters, fuzzy search, compact mode, saved custom views, and fullscreen mode.
+- Right-click menus on desktop and long-press menus on mobile for table and column actions.
+- CSV and Excel XLSX exports contain the current filtered/sorted rows and visible columns; JSON exports preserve the complete run document.
+- Every table view is persisted independently in IndexedDB and restored across reloads, including the active table.
+- Account-scoped run history retains all fetched and imported runs and automatically opens the chronologically newest run at startup.
+- Paizo account identities are canonicalized case-insensitively while preserving distinct `+` aliases, and accounts can be switched without losing run history.
+- Rows whose notes start with “player has already played” remain visible, receive zero XP, and are styled gray; a filter can exclude every zero-XP event.
+- Character effective levels use reduced ASCII fractions, such as `4 5/12` or `2 1/2`.
+- Responsive desktop and mobile layouts, compact scenario/date labels, and dark/light themes.
 
 ## License
 
@@ -118,7 +119,7 @@ limitations under the License.
 
 - The scraping flow and selectors live in `src/scraper.ts` and are the source of truth for page navigation and parsing.
 - The server endpoints and queueing logic are in `src/server.ts`.
-- The browser UI and persistence logic are in `public/index.html`.
+- The browser UI and persistence logic are in `src/client`; Vite emits the deployable assets under `public`.
 
 If Playwright reports a missing executable, install Firefox with:
 

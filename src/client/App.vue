@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import { Dark, useQuasar } from 'quasar';
 import localforage from 'localforage';
 import type { FilterModel, GridState } from 'ag-grid-community';
+import { createPaizoAccountIdentity } from '../account';
 
 import { BUILD_ID, BUILD_TIMESTAMP } from '../build-info';
 import WelcomePanel from './components/WelcomePanel.vue';
@@ -19,6 +20,9 @@ import type { CharacterSummaryView } from './components/CharacterSummary.vue';
 import {
   aggregateCharacterSummaries,
   characterKey,
+  compactGameSystem,
+  compactScenarioName,
+  formatShortDate,
   parsePfxpDocument,
   searchSessionRows,
   type PfxpDocument,
@@ -29,12 +33,13 @@ import {
   PfxpApiClient,
   ScrapeController,
   createFilteredSessionsExport,
-  downloadCsv,
   downloadFilteredSessions,
   downloadFullDocument,
-  type CsvColumn,
+  downloadTableViewCsv,
+  downloadTableViewXlsx,
   type HistoryEntry,
   type ScrapeState,
+  type TableExportView,
 } from './services';
 
 const CharacterSummary = defineAsyncComponent(() => import('./components/CharacterSummary.vue'));
@@ -57,6 +62,8 @@ interface SessionsGridApi {
   fitColumns(): void;
   reset(): void;
   exportCsv(filename?: string): void;
+  exportXlsx(filename?: string): Promise<void>;
+  getExportView(): TableExportView | null;
   getCurrentRows(): SessionDetail[];
   getColumns(): GridColumnView[];
   setColumnVisible(id: string, visible: boolean): boolean;
@@ -93,6 +100,7 @@ const density = ref<Density>('comfortable');
 const preset = ref<Preset>('default');
 const floatingFilters = ref(false);
 const initialGridState = ref<GridState>();
+const initialManualColumns = ref<string[]>([]);
 
 const quickSearch = ref<string | null>('');
 const searchTerms = ref<string[]>([]);
@@ -102,6 +110,7 @@ const characterFilter = ref<string | null>(null);
 const exactCharacterKey = ref<string | null>(null);
 const roleFilter = ref<RoleFilter>('all');
 const dateRange = ref<DateRangeFilter>('any');
+const excludeNoXp = ref(false);
 const mobileSort = ref<MobileSort>('date-desc');
 const filterDrawerOpen = ref(false);
 const filterModel = ref<FilterModel>({});
@@ -114,6 +123,31 @@ const historyEntries = ref<HistoryEntry[]>([]);
 const columnSearch = ref('');
 const columns = ref<GridColumnView[]>([]);
 const fullscreen = ref(false);
+
+interface AccountView {
+  key: string;
+  email: string;
+  runCount: number;
+  latestTimestamp: number;
+  latestRunId: string;
+}
+
+interface SessionViewPreferences {
+  quickSearch: string;
+  searchTerms: string[];
+  combineMode: CombineMode;
+  gameFilter: string | null;
+  characterFilter: string | null;
+  exactCharacterKey: string | null;
+  roleFilter: RoleFilter;
+  dateRange: DateRangeFilter;
+  excludeNoXp: boolean;
+  mobileSort: MobileSort;
+  density: Density;
+  preset: Preset;
+  floatingFilters: boolean;
+  manualColumns: string[];
+}
 
 const sessionsGrid = ref<SessionsGridApi | null>(null);
 const searchInput = ref<{ focus?: () => void } | null>(null);
@@ -128,7 +162,7 @@ const summaries = computed((): CharacterSummaryView[] => {
     name: row.character || (row.charid == null ? 'GM sessions' : `Character ${row.charid}`),
     gameSystem: row.game,
     totalXp: row.totalXp,
-    effectiveLevel: row.effectiveLevel ?? 'N/A',
+    effectiveLevel: row.effectiveLevel,
     sessionCount: row.sessionCount,
     lastPlayed: row.lastPlayed ?? undefined,
     orgplayid: row.orgplayid,
@@ -154,6 +188,7 @@ const advancedRows = computed((): SessionDetail[] => {
   }
   const cutoff = dateCutoff(dateRange.value);
   if (cutoff) rows = rows.filter((row) => row.date && Date.parse(row.date) >= cutoff);
+  if (excludeNoXp.value) rows = rows.filter((row) => Number.isFinite(row.xp) && row.xp > 0);
   return rows;
 });
 
@@ -193,6 +228,7 @@ const activeFilterChips = computed(() => {
     const labels: Record<DateRangeFilter, string> = { any: '', '30d': 'Last 30 days', '12m': 'Last 12 months', year: 'This year' };
     chips.push({ id: 'date', label: `Date: ${labels[dateRange.value]}` });
   }
+  if (excludeNoXp.value) chips.push({ id: 'no-xp', label: 'Exclude events with no XP reward' });
   return chips;
 });
 
@@ -202,8 +238,35 @@ const visibleCount = computed(() => $q.screen.lt.md ? mobileRows.value.length : 
 const runViews = computed<RunView[]>(() => historyEntries.value.map((entry) => ({
   ...entry,
   timestamp: entry.ts,
-  label: entry.source === 'fetch' ? 'Paizo account fetch' : entry.source === 'file' ? 'PFXP JSON export' : 'Saved run',
+  label: entry.label,
 })));
+const activeRunEntry = computed(() => historyEntries.value.find((entry) => entry.id === activeRunId.value) ?? null);
+const accountViews = computed<AccountView[]>(() => {
+  const accounts = new Map<string, AccountView>();
+  for (const entry of historyEntries.value) {
+    if (!entry.accountKey || !entry.accountEmail) continue;
+    const existing = accounts.get(entry.accountKey);
+    if (!existing) {
+      accounts.set(entry.accountKey, {
+        key: entry.accountKey,
+        email: entry.accountEmail,
+        runCount: 1,
+        latestTimestamp: entry.ts,
+        latestRunId: entry.id,
+      });
+    } else {
+      existing.runCount += 1;
+      if (entry.ts > existing.latestTimestamp) {
+        existing.latestTimestamp = entry.ts;
+        existing.latestRunId = entry.id;
+      }
+    }
+  }
+  return [...accounts.values()].sort((left, right) => right.latestTimestamp - left.latestTimestamp);
+});
+const activeAccountEmail = computed(() => documentData.value?.account?.email
+  ?? activeRunEntry.value?.accountEmail
+  ?? (email.value ? createPaizoAccountIdentity(email.value).email : ''));
 const filteredColumns = computed(() => {
   const query = columnSearch.value.trim().toLocaleLowerCase();
   if (!query) return columns.value;
@@ -216,7 +279,7 @@ const workspaceContextActions = computed<ContextMenuAction[]>(() => {
     {
       id: 'filters:open',
       label: 'Open filters',
-      caption: totalFilterCount.value ? `${totalFilterCount.value} active` : 'Game, character, role, date, and search terms',
+      caption: totalFilterCount.value ? `${totalFilterCount.value} active` : 'Game, character, role, date, XP reward, and search terms',
       icon: 'r_filter_alt',
     },
     { id: 'filters:clear', label: 'Clear active filters', icon: 'r_filter_alt_off', disabled: totalFilterCount.value === 0 },
@@ -290,6 +353,7 @@ const workspaceContextActions = computed<ContextMenuAction[]>(() => {
       separatorBefore: true,
       children: [
         { id: 'export:csv', label: 'Visible sessions as CSV', icon: 'r_table_view' },
+        { id: 'export:xlsx', label: 'Visible sessions as Excel XLSX', icon: 'r_grid_on' },
         { id: 'export:filtered-json', label: 'Filtered sessions as JSON', icon: 'r_filter_alt' },
         { id: 'export:full-json', label: 'Full PFXP JSON', icon: 'r_archive' },
       ],
@@ -319,25 +383,28 @@ const progressMessage = computed(() => {
 });
 const themeIcon = computed(() => themeMode.value === 'system' ? 'r_brightness_auto' : darkActive.value ? 'r_dark_mode' : 'r_light_mode');
 
-const sessionCsvColumns: CsvColumn<SessionDetail>[] = [
-  { header: 'Date', value: (row) => row.date },
-  { header: 'Character', value: (row) => row.character.name },
-  { header: 'Game System', value: (row) => row.gameSystem },
-  { header: 'Scenario', value: (row) => row.scenario },
-  { header: 'XP', value: (row) => row.xp },
-  { header: 'GM', value: (row) => row.gm },
-  { header: 'Event', value: (row) => row.event.name },
-  { header: 'Event ID', value: (row) => row.event.id },
-  { header: 'Session', value: (row) => row.session },
-  { header: 'Org Play ID', value: (row) => row.player.orgplayid },
-  { header: 'Character ID', value: (row) => row.player.charid },
-  { header: 'Faction', value: (row) => row.faction.name },
-  { header: 'Prestige / Reputation', value: (row) => row.prestigeReputation.prestigePoints },
-  { header: 'GM?', value: (row) => row.prestigeReputation.isGM },
-  { header: 'Achievement Points', value: (row) => row.points.achievementPoints },
-  { header: 'GM Credits', value: (row) => row.points.gmCredits },
-  { header: 'Notes', value: (row) => row.notes },
-];
+function mobileSessionExportView(): TableExportView {
+  const compact = density.value === 'compact';
+  return {
+    sheetName: 'Sessions',
+    columns: [
+      { id: 'date', header: 'Date', widthPx: 100 },
+      { id: 'scenario', header: 'Scenario', widthPx: 320 },
+      { id: 'character.name', header: 'Character', widthPx: 180 },
+      { id: 'gameSystem', header: 'Game system', widthPx: 130 },
+      { id: 'xp', header: 'XP', widthPx: 70 },
+      { id: 'role', header: 'Role', widthPx: 80 },
+    ],
+    rows: mobileRows.value.map((row) => [
+      compact ? formatShortDate(row.date) : row.date,
+      compact ? compactScenarioName(row.scenario) : row.scenario,
+      row.character.name,
+      compact ? compactGameSystem(row.gameSystem) : row.gameSystem,
+      row.xp,
+      row.prestigeReputation.isGM === 'yes' ? 'GM' : 'Player',
+    ]),
+  };
+}
 
 function uniqueSorted(values: string[]) {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
@@ -387,6 +454,7 @@ function removeFilterChip(id: string) {
   else if (id === 'character') setCharacterFacet(null);
   else if (id === 'role') roleFilter.value = 'all';
   else if (id === 'date') dateRange.value = 'any';
+  else if (id === 'no-xp') excludeNoXp.value = false;
 }
 
 function clearAllFilters() {
@@ -396,22 +464,28 @@ function clearAllFilters() {
   exactCharacterKey.value = null;
   roleFilter.value = 'all';
   dateRange.value = 'any';
+  excludeNoXp.value = false;
   filterModel.value = {};
   sessionsGrid.value?.clearFilters();
 }
 
 async function activateDocument(value: PfxpDocument, source: string, options: { save?: boolean; runId?: string | null } = {}) {
-  documentData.value = value;
+  const account = value.account ?? (source === 'fetch' && email.value
+    ? createPaizoAccountIdentity(email.value)
+    : undefined);
+  const normalized = account && !value.account ? { ...value, account } : value;
+  documentData.value = normalized;
   activeSource.value = source;
   activeRunId.value = options.runId ?? null;
-  activeTab.value = 'sessions';
-  quickSearch.value = '';
-  clearAllFilters();
-  gridFilteredCount.value = value.details.length;
+  gridFilteredCount.value = normalized.details.length;
   inlineError.value = '';
+  if (account) {
+    email.value = account.email;
+    persistPreference('pfxp:user:email', account.email);
+  }
   if (options.save !== false) {
     try {
-      const entry = await historyRepository.add(value, source);
+      const entry = await historyRepository.add(normalized, source);
       activeRunId.value = entry.id;
       await refreshHistory();
     } catch {
@@ -429,7 +503,7 @@ async function activateDocument(value: PfxpDocument, source: string, options: { 
 
 async function startScrape(credentials: { email: string; password: string }) {
   if (busy.value) return;
-  const submittedEmail = credentials.email;
+  const submittedEmail = createPaizoAccountIdentity(credentials.email).email;
   let submittedPassword = credentials.password;
   credentials.password = '';
   busy.value = true;
@@ -505,6 +579,19 @@ async function loadHistoryRun(id: string) {
   } catch {
     $q.notify({ message: 'That saved run could not be opened.', color: 'negative', icon: 'r_error' });
   }
+}
+
+async function switchAccount(accountKey: string): Promise<void> {
+  const account = accountViews.value.find((candidate) => candidate.key === accountKey);
+  if (!account) return;
+  await loadHistoryRun(account.latestRunId);
+}
+
+function addPaizoAccount(): void {
+  closeDocument();
+  email.value = '';
+  persistPreference('pfxp:user:email', '');
+  inlineError.value = '';
 }
 
 function deleteHistoryRun(entry: HistoryEntry) {
@@ -608,7 +695,6 @@ function moveColumn(column: GridColumnView, direction: -1 | 1) {
 function setFloatingFilters(value: boolean) {
   floatingFilters.value = value;
   sessionsGrid.value?.setFloatingFilters(value);
-  persistPreference('pfxp:v2:floatingFilters', value);
 }
 
 function clearColumnFilters() {
@@ -624,6 +710,8 @@ function resetView() {
   clearAllFilters();
   quickSearch.value = '';
   initialGridState.value = undefined;
+  initialManualColumns.value = [];
+  void preferences.removeItem('pfxp:v3:sessionGridState').catch(() => undefined);
   void preferences.removeItem('pfxp:v2:gridState').catch(() => undefined);
   $q.notify({ message: 'View reset. Saved runs and theme were kept.', icon: 'r_restart_alt' });
 }
@@ -664,6 +752,7 @@ function handleWorkspaceContextAction(id: string) {
   else if (id === 'columns:fit') sessionsGrid.value?.fitColumns();
   else if (id.startsWith('mobile-sort:')) mobileSort.value = id.slice(12) as MobileSort;
   else if (id === 'export:csv') exportCsv();
+  else if (id === 'export:xlsx') void exportXlsx();
   else if (id === 'export:filtered-json') exportFilteredJson();
   else if (id === 'export:full-json') exportFullJson();
   else if (id === 'fullscreen') void toggleFullscreen();
@@ -689,8 +778,22 @@ function exportFilteredJson() {
 }
 
 function exportCsv() {
-  if (!$q.screen.lt.md && sessionsGrid.value) sessionsGrid.value.exportCsv('pfxp-sessions.csv');
-  else downloadCsv(currentRowsForExport(), sessionCsvColumns, 'pfxp-sessions.csv');
+  const view = $q.screen.lt.md
+    ? mobileSessionExportView()
+    : sessionsGrid.value?.getExportView();
+  if (view) downloadTableViewCsv(view, 'pfxp-sessions.csv');
+}
+
+async function exportXlsx() {
+  const view = $q.screen.lt.md
+    ? mobileSessionExportView()
+    : sessionsGrid.value?.getExportView();
+  if (!view) return;
+  try {
+    await downloadTableViewXlsx(view, 'pfxp-sessions.xlsx');
+  } catch {
+    $q.notify({ message: 'Unable to create the Excel workbook.', color: 'negative', icon: 'r_error' });
+  }
 }
 
 async function toggleFullscreen() {
@@ -703,7 +806,7 @@ async function toggleFullscreen() {
 }
 
 function onFullscreenChange() {
-  fullscreen.value = !!globalThis.document.fullscreenElement;
+  fullscreen.value = globalThis.document.fullscreenElement === workspacePage.value;
   nextTick(() => sessionsGrid.value?.resize());
 }
 
@@ -736,10 +839,36 @@ function onGlobalKeydown(event: KeyboardEvent) {
 async function persistGridState(state: GridState) {
   initialGridState.value = state;
   try {
-    await preferences.setItem('pfxp:v2:gridState', state);
+    await preferences.setItem('pfxp:v3:sessionGridState', state);
   } catch {
     // The active grid remains usable when browser storage is unavailable.
   }
+}
+
+function persistManualColumns(columns: string[]): void {
+  initialManualColumns.value = columns;
+  persistSessionView();
+}
+
+function persistSessionView(): void {
+  if (!settingsReady.value) return;
+  const value: SessionViewPreferences = {
+    quickSearch: quickSearch.value ?? '',
+    searchTerms: [...searchTerms.value],
+    combineMode: combineMode.value,
+    gameFilter: gameFilter.value,
+    characterFilter: characterFilter.value,
+    exactCharacterKey: exactCharacterKey.value,
+    roleFilter: roleFilter.value,
+    dateRange: dateRange.value,
+    excludeNoXp: excludeNoXp.value,
+    mobileSort: mobileSort.value,
+    density: density.value,
+    preset: preset.value,
+    floatingFilters: floatingFilters.value,
+    manualColumns: [...initialManualColumns.value],
+  };
+  void preferences.setItem('pfxp:v3:sessionView', value).catch(() => undefined);
 }
 
 function onFilteredCount(count: number) {
@@ -753,23 +882,78 @@ const onSystemThemeChange = () => { if (themeMode.value === 'system') applyTheme
 
 onMounted(async () => {
   try {
-    const [savedTheme, legacyTheme, savedEmail, savedDensity, savedPreset, savedFloating, savedGridState] = await Promise.all([
+    const [
+      savedTheme,
+      legacyTheme,
+      savedEmail,
+      savedSessionView,
+      savedGridState,
+      legacyGridState,
+      legacyDensity,
+      legacyPreset,
+      legacyFloating,
+      savedActiveTab,
+    ] = await Promise.all([
       readPreference<ThemeMode>('pfxp:v2:theme'),
       readPreference<'light' | 'dark'>('theme:preference'),
       readPreference<string>('pfxp:user:email'),
+      readPreference<Partial<SessionViewPreferences>>('pfxp:v3:sessionView'),
+      readPreference<GridState>('pfxp:v3:sessionGridState'),
+      readPreference<GridState>('pfxp:v2:gridState'),
       readPreference<Density>('pfxp:v2:density'),
       readPreference<Preset>('pfxp:viewPreset'),
       readPreference<boolean>('pfxp:v2:floatingFilters'),
-      readPreference<GridState>('pfxp:v2:gridState'),
+      readPreference<'sessions' | 'characters'>('pfxp:v3:activeTab'),
     ]);
     themeMode.value = savedTheme ?? legacyTheme ?? 'system';
     email.value = savedEmail ?? '';
-    density.value = savedDensity ?? 'comfortable';
-    preset.value = savedPreset ?? 'default';
-    floatingFilters.value = savedFloating ?? false;
-    initialGridState.value = savedGridState ?? undefined;
+    density.value = savedSessionView?.density ?? legacyDensity ?? 'comfortable';
+    preset.value = savedSessionView?.preset ?? legacyPreset ?? 'default';
+    floatingFilters.value = savedSessionView?.floatingFilters ?? legacyFloating ?? false;
+    quickSearch.value = savedSessionView?.quickSearch ?? '';
+    searchTerms.value = Array.isArray(savedSessionView?.searchTerms)
+      ? savedSessionView.searchTerms.filter((value): value is string => typeof value === 'string')
+      : [];
+    combineMode.value = savedSessionView?.combineMode === 'OR' ? 'OR' : 'AND';
+    gameFilter.value = savedSessionView?.gameFilter ?? null;
+    characterFilter.value = savedSessionView?.characterFilter ?? null;
+    exactCharacterKey.value = savedSessionView?.exactCharacterKey ?? null;
+    roleFilter.value = ['gm', 'player'].includes(savedSessionView?.roleFilter ?? '')
+      ? savedSessionView!.roleFilter as RoleFilter
+      : 'all';
+    dateRange.value = ['30d', '12m', 'year'].includes(savedSessionView?.dateRange ?? '')
+      ? savedSessionView!.dateRange as DateRangeFilter
+      : 'any';
+    excludeNoXp.value = savedSessionView?.excludeNoXp === true;
+    mobileSort.value = ['date-asc', 'xp-desc', 'character'].includes(savedSessionView?.mobileSort ?? '')
+      ? savedSessionView!.mobileSort as MobileSort
+      : 'date-desc';
+    initialManualColumns.value = Array.isArray(savedSessionView?.manualColumns)
+      ? savedSessionView.manualColumns.filter((value): value is string => typeof value === 'string')
+      : [];
+    activeTab.value = savedActiveTab === 'characters' ? 'characters' : 'sessions';
+    initialGridState.value = savedGridState ?? legacyGridState ?? undefined;
     try {
+      await historyRepository.migrateLegacyAccounts(email.value);
       await refreshHistory();
+      let unreadableRuns = 0;
+      for (const entry of historyEntries.value) {
+        try {
+          const saved = await historyRepository.load(entry.id);
+          if (!saved) continue;
+          await activateDocument(saved.document, saved.entry.source, { save: false, runId: saved.entry.id });
+          break;
+        } catch {
+          unreadableRuns += 1;
+        }
+      }
+      if (unreadableRuns) {
+        $q.notify({
+          message: `${unreadableRuns} saved ${unreadableRuns === 1 ? 'run was' : 'runs were'} unreadable; the newest valid run was opened.`,
+          color: 'warning',
+          icon: 'r_warning',
+        });
+      }
     } catch {
       historyEntries.value = [];
       $q.notify({ message: 'Previous runs are unavailable in this browser.', color: 'warning', icon: 'r_storage' });
@@ -785,8 +969,24 @@ onMounted(async () => {
   globalThis.document.addEventListener('fullscreenchange', onFullscreenChange);
 });
 
-watch(density, (value) => persistPreference('pfxp:v2:density', value));
-watch(preset, (value) => persistPreference('pfxp:viewPreset', value));
+watch([
+  quickSearch,
+  searchTerms,
+  combineMode,
+  gameFilter,
+  characterFilter,
+  exactCharacterKey,
+  roleFilter,
+  dateRange,
+  excludeNoXp,
+  mobileSort,
+  density,
+  preset,
+  floatingFilters,
+], persistSessionView, { deep: true });
+watch(activeTab, (value) => {
+  if (settingsReady.value) persistPreference('pfxp:v3:activeTab', value);
+});
 
 onBeforeUnmount(() => {
   scrapeController.stop();
@@ -808,6 +1008,20 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="pfxp-header__actions pfxp-desktop-only">
+          <q-btn flat no-caps class="pfxp-header-action" icon="r_switch_account" label="Accounts">
+            <q-menu auto-close>
+              <q-list style="min-width: 300px">
+                <q-item-label header>Paizo accounts</q-item-label>
+                <q-item v-for="account in accountViews" :key="account.key" clickable :active="account.key === documentData?.account?.key" active-class="text-primary bg-blue-1" @click="switchAccount(account.key)">
+                  <q-item-section avatar><q-icon name="r_account_circle" /></q-item-section>
+                  <q-item-section><q-item-label>{{ account.email }}</q-item-label><q-item-label caption>{{ account.runCount }} saved {{ account.runCount === 1 ? 'run' : 'runs' }} · latest {{ formatHistoryDate(account.latestTimestamp) }}</q-item-label></q-item-section>
+                  <q-item-section side v-if="account.key === documentData?.account?.key"><q-icon name="r_check" color="primary" /></q-item-section>
+                </q-item>
+                <q-separator />
+                <q-item clickable @click="addPaizoAccount"><q-item-section avatar><q-icon name="r_person_add" /></q-item-section><q-item-section>Add another Paizo account</q-item-section></q-item>
+              </q-list>
+            </q-menu>
+          </q-btn>
           <q-btn flat no-caps class="pfxp-header-action" icon="r_history" label="Previous runs" :disable="!historyEntries.length" @click="historyOpen = true" />
           <q-btn flat no-caps class="pfxp-header-action" icon="r_upload_file" label="Import JSON" @click="triggerImport" />
           <q-btn flat no-caps class="pfxp-header-action" icon="r_refresh" label="Refresh" :loading="busy" :disable="!email || busy" @click="refreshFromPaizo" />
@@ -823,7 +1037,7 @@ onBeforeUnmount(() => {
           <q-btn flat round icon="r_more_vert" aria-label="More actions">
             <q-menu auto-close>
               <q-list style="min-width: 220px">
-                <q-item v-if="documentData" clickable @click="closeDocument"><q-item-section avatar><q-icon name="r_switch_account" /></q-item-section><q-item-section>Switch data source</q-item-section></q-item>
+                <q-item v-if="documentData" clickable @click="addPaizoAccount"><q-item-section avatar><q-icon name="r_person_add" /></q-item-section><q-item-section>Add Paizo account</q-item-section></q-item>
                 <q-item v-if="documentData" clickable @click="resetView"><q-item-section avatar><q-icon name="r_restart_alt" /></q-item-section><q-item-section>Reset view</q-item-section></q-item>
                 <q-separator />
                 <q-item><q-item-section><q-item-label caption>Build {{ BUILD_ID }}</q-item-label></q-item-section></q-item>
@@ -838,9 +1052,11 @@ onBeforeUnmount(() => {
           <q-btn flat round icon="r_more_vert" aria-label="More actions">
             <q-menu auto-close>
               <q-list style="min-width: 220px">
+                <q-item v-for="account in accountViews" :key="account.key" clickable @click="switchAccount(account.key)"><q-item-section avatar><q-icon name="r_account_circle" /></q-item-section><q-item-section><q-item-label>{{ account.email }}</q-item-label><q-item-label caption>{{ account.runCount }} saved {{ account.runCount === 1 ? 'run' : 'runs' }}</q-item-label></q-item-section><q-item-section side v-if="account.key === documentData?.account?.key"><q-icon name="r_check" color="primary" /></q-item-section></q-item>
+                <q-item clickable @click="addPaizoAccount"><q-item-section avatar><q-icon name="r_person_add" /></q-item-section><q-item-section>Add Paizo account</q-item-section></q-item>
+                <q-separator />
                 <q-item clickable @click="triggerImport"><q-item-section avatar><q-icon name="r_upload_file" /></q-item-section><q-item-section>Import JSON</q-item-section></q-item>
                 <q-item clickable @click="setTheme(darkActive ? 'light' : 'dark')"><q-item-section avatar><q-icon :name="darkActive ? 'r_light_mode' : 'r_dark_mode'" /></q-item-section><q-item-section>{{ darkActive ? 'Light appearance' : 'Dark appearance' }}</q-item-section></q-item>
-                <q-item v-if="documentData" clickable @click="closeDocument"><q-item-section avatar><q-icon name="r_switch_account" /></q-item-section><q-item-section>Switch data source</q-item-section></q-item>
                 <q-item v-if="documentData" clickable @click="resetView"><q-item-section avatar><q-icon name="r_restart_alt" /></q-item-section><q-item-section>Reset view</q-item-section></q-item>
               </q-list>
             </q-menu>
@@ -872,6 +1088,10 @@ onBeforeUnmount(() => {
 
       <template v-else>
         <div class="pfxp-tabs-wrap">
+          <div class="pfxp-active-run" aria-label="Loaded run">
+            <div><q-icon name="r_history" /><strong>{{ activeRunEntry?.label ?? (activeSource === 'fetch' ? 'Paizo account fetch' : 'Loaded data') }}</strong><span v-if="activeAccountEmail">{{ activeAccountEmail }}</span></div>
+            <time v-if="activeRunEntry" :datetime="new Date(activeRunEntry.ts).toISOString()">{{ formatHistoryDate(activeRunEntry.ts) }}</time>
+          </div>
           <q-tabs v-model="activeTab" dense align="left" indicator-color="primary" active-color="primary" class="pfxp-tabs">
             <q-tab name="sessions"><span>Sessions <span class="pfxp-tab-count">{{ documentData.details.length }}</span></span></q-tab>
             <q-tab name="characters"><span>Characters <span class="pfxp-tab-count">{{ summaries.length }}</span></span></q-tab>
@@ -928,8 +1148,8 @@ onBeforeUnmount(() => {
                       </q-list>
                     </q-scroll-area>
                     <div class="column-menu__footer">
-                      <q-btn flat no-caps label="Auto-size" @click="sessionsGrid?.autoSizeColumns()" />
-                      <q-btn flat no-caps label="Fit viewport" @click="sessionsGrid?.fitColumns()" />
+                      <q-btn flat no-caps label="Reset to auto width" @click="sessionsGrid?.autoSizeColumns()" />
+                      <q-btn flat no-caps label="Fit viewport (manual)" @click="sessionsGrid?.fitColumns()" />
                     </div>
                   </q-menu>
                 </q-btn>
@@ -947,6 +1167,7 @@ onBeforeUnmount(() => {
                 <q-btn-dropdown outline no-caps icon="r_download" label="Export" class="pfxp-command">
                   <q-list style="min-width: 250px">
                     <q-item clickable v-close-popup @click="exportCsv"><q-item-section avatar><q-icon name="r_table_view" /></q-item-section><q-item-section><q-item-label>Filtered CSV</q-item-label><q-item-label caption>Current sorted and filtered rows</q-item-label></q-item-section></q-item>
+                    <q-item clickable v-close-popup @click="exportXlsx"><q-item-section avatar><q-icon name="r_grid_on" /></q-item-section><q-item-section><q-item-label>Excel XLSX</q-item-label><q-item-label caption>Visible columns and current rows</q-item-label></q-item-section></q-item>
                     <q-item clickable v-close-popup @click="exportFilteredJson"><q-item-section avatar><q-icon name="r_filter_alt" /></q-item-section><q-item-section><q-item-label>Filtered JSON</q-item-label><q-item-label caption>Explicit filtered-results wrapper</q-item-label></q-item-section></q-item>
                     <q-item clickable v-close-popup @click="exportFullJson"><q-item-section avatar><q-icon name="r_archive" /></q-item-section><q-item-section><q-item-label>Full PFXP JSON</q-item-label><q-item-label caption>Can be imported again later</q-item-label></q-item-section></q-item>
                   </q-list>
@@ -963,7 +1184,7 @@ onBeforeUnmount(() => {
                   { label: 'Sort: Character', value: 'character' },
                 ]" />
                 <q-btn outline round icon="r_more_vert" class="pfxp-command" aria-label="Session actions">
-                  <q-menu auto-close><q-list><q-item clickable @click="exportCsv"><q-item-section avatar><q-icon name="r_table_view" /></q-item-section><q-item-section>Export CSV</q-item-section></q-item><q-item clickable @click="exportFullJson"><q-item-section avatar><q-icon name="r_archive" /></q-item-section><q-item-section>Full JSON</q-item-section></q-item></q-list></q-menu>
+                  <q-menu auto-close><q-list><q-item clickable @click="exportCsv"><q-item-section avatar><q-icon name="r_table_view" /></q-item-section><q-item-section>Export CSV</q-item-section></q-item><q-item clickable @click="exportXlsx"><q-item-section avatar><q-icon name="r_grid_on" /></q-item-section><q-item-section>Export XLSX</q-item-section></q-item><q-item clickable @click="exportFullJson"><q-item-section avatar><q-icon name="r_archive" /></q-item-section><q-item-section>Full JSON</q-item-section></q-item></q-list></q-menu>
                 </q-btn>
               </div>
 
@@ -992,6 +1213,7 @@ onBeforeUnmount(() => {
                 :density="density"
                 :preset="preset"
                 :initial-state="initialGridState"
+                :initial-manual-columns="initialManualColumns"
                 @row-selected="showSession"
                 @filtered-count="onFilteredCount"
                 @state-changed="persistGridState"
@@ -999,12 +1221,14 @@ onBeforeUnmount(() => {
                 @filter-model-changed="filterModel = $event"
                 @filter-character="filterBySessionCharacter"
                 @floating-filters-changed="setFloatingFilters"
+                @manual-columns-changed="persistManualColumns"
               />
               <MobileSessions
                 v-else
                 :rows="mobileRows"
                 :sort="mobileSort"
                 :has-filters="totalFilterCount > 0"
+                :density="density"
                 @select="showSession"
                 @filter-character="filterBySessionCharacter"
                 @filter-game="filterByGame"
@@ -1026,7 +1250,7 @@ onBeforeUnmount(() => {
             </footer>
           </template>
 
-          <CharacterSummary v-else :rows="summaries" :dark="darkActive" :density="density" @select="onCharacterSelected" />
+          <CharacterSummary v-else :rows="summaries" :dark="darkActive" @select="onCharacterSelected" />
         </main>
       </template>
     </q-page-container>
@@ -1045,8 +1269,10 @@ onBeforeUnmount(() => {
       :character-options="characterOptions"
       :match-count="searchedRows.length"
       :floating-filters="floatingFilters"
+      :exclude-no-xp="excludeNoXp"
       @update:character="setCharacterFacet"
       @update:floating-filters="setFloatingFilters"
+      @update:exclude-no-xp="excludeNoXp = $event"
       @reset="clearAllFilters"
     />
 
@@ -1055,14 +1281,14 @@ onBeforeUnmount(() => {
     <q-dialog v-model="historyOpen">
       <q-card class="pfxp-dialog-card history-dialog">
         <header class="pfxp-sheet-header">
-          <div class="col"><h2 class="pfxp-sheet-title">Previous runs</h2><div class="pfxp-sheet-subtitle">Saved only in this browser · up to 25</div></div>
+          <div class="col"><h2 class="pfxp-sheet-title">Previous runs</h2><div class="pfxp-sheet-subtitle">Saved in this browser across every Paizo account</div></div>
           <q-btn flat round icon="r_close" aria-label="Close previous runs" v-close-popup />
         </header>
         <q-scroll-area class="history-dialog__body">
           <q-list separator>
             <q-item v-for="entry in runViews" :key="entry.id" :active="entry.id === activeRunId" active-class="history-dialog__active">
               <q-item-section avatar><q-icon :name="entry.source === 'fetch' ? 'r_cloud_download' : 'r_description'" color="primary" /></q-item-section>
-              <q-item-section clickable @click="loadHistoryRun(entry.id)"><q-item-label class="text-weight-bold">{{ entry.label }}</q-item-label><q-item-label caption>{{ formatHistoryDate(entry.ts) }}</q-item-label></q-item-section>
+              <q-item-section clickable @click="loadHistoryRun(entry.id)"><q-item-label class="text-weight-bold">{{ entry.label }}</q-item-label><q-item-label caption>{{ entry.accountEmail ?? 'Unassigned account' }} · {{ formatHistoryDate(entry.ts) }}</q-item-label></q-item-section>
               <q-item-section side><div class="row no-wrap"><q-btn flat round icon="r_open_in_new" aria-label="Open saved run" @click="loadHistoryRun(entry.id)" /><q-btn flat round icon="r_delete" color="negative" aria-label="Delete saved run" @click="deleteHistoryRun(entry)" /></div></q-item-section>
             </q-item>
             <q-item v-if="!runViews.length"><q-item-section class="text-center text-grey-7 q-pa-xl">No saved runs yet.</q-item-section></q-item>

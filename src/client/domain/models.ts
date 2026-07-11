@@ -1,3 +1,5 @@
+import type { PaizoAccountIdentity } from '../../account';
+
 /** Game systems emitted by the scraper and understood by the client. */
 export const GAME_SYSTEMS = [
   'Pathfinder 1e',
@@ -59,6 +61,7 @@ export interface LegacyCharacterSummary {
 
 /** A complete, re-importable scraper result. */
 export interface PfxpDocument {
+  account?: PaizoAccountIdentity;
   characters: Character[];
   details: SessionDetail[];
   summary: Record<string, LegacyCharacterSummary>;

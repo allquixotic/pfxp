@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
-import { copyToClipboard as copyTextToClipboard } from 'quasar';
+import { copyToClipboard as copyTextToClipboard, useQuasar } from 'quasar';
 import { AgGridVue } from 'ag-grid-vue3';
 import {
   AllCommunityModule,
@@ -11,11 +11,18 @@ import {
   type CellKeyDownEvent,
   type ColDef,
   type Column,
+  type ColumnMovedEvent,
+  type ColumnResizedEvent,
+  type ColumnVisibleEvent,
+  type FilterChangedEvent,
+  type FilterModel,
+  type FirstDataRenderedEvent,
   type GetRowIdFunc,
   type GridApi,
   type GridReadyEvent,
   type GridState,
   type ICellRendererParams,
+  type ModelUpdatedEvent,
   type RowSelectionOptions,
   type SelectionChangedEvent,
   type StateUpdatedEvent,
@@ -26,34 +33,60 @@ import localforage from 'localforage';
 import ContextActionMenu from './ContextActionMenu.vue';
 import type { ContextMenuAction, ContextMenuTrigger } from './context-menu-model';
 import type { CharacterSummaryView } from './CharacterSummary.vue';
+import {
+  CHARACTER_COLUMN_LABELS,
+  CHARACTER_COLUMN_ORDER,
+  CHARACTER_PRESET_COLUMNS,
+  compactGameSystem,
+  formatEffectiveLevel,
+  formatShortDate,
+  type CharacterColumnId,
+  type CharacterPreset,
+} from '../domain';
+import {
+  AutoColumnSizer,
+  downloadTableViewCsv,
+  downloadTableViewXlsx,
+  getGridTableExportView,
+  type TableExportView,
+} from '../services';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 const props = withDefaults(defineProps<{
   rows: CharacterSummaryView[];
-  query?: string;
   dark?: boolean;
   density?: 'compact' | 'comfortable';
+  preset?: CharacterPreset;
 }>(), {
-  query: '',
   dark: false,
   density: 'comfortable',
+  preset: 'default',
 });
 
-const emit = defineEmits<{ select: [row: CharacterSummaryView] }>();
+const emit = defineEmits<{
+  select: [row: CharacterSummaryView];
+  presetCustomized: [];
+  filterModelChanged: [model: FilterModel];
+  filteredCount: [count: number];
+}>();
+const $q = useQuasar();
 const characterPreferences = localforage.createInstance({ name: 'pfxp' });
 const gridApi = shallowRef<GridApi<CharacterSummaryView> | null>(null);
+const gridRoot = ref<HTMLElement | null>(null);
 const contextMenu = ref<InstanceType<typeof ContextActionMenu> | null>(null);
 const persistedState = shallowRef<GridState>();
 const stateReady = ref(false);
 const contextRevision = ref(0);
-const normalizedQuery = computed(() => props.query.trim());
-const STATE_KEY = 'pfxp:v2:characterGridState';
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-});
+const STATE_KEY = 'pfxp:v3:characterGridState';
+const LEGACY_STATE_KEY = 'pfxp:v2:characterGridState';
+const floatingFiltersVisible = ref(false);
+const restoredManualColumns = ref<string[]>([]);
+
+interface StoredCharacterGridState {
+  state: GridState;
+  manualColumns: string[];
+}
 
 interface CharacterContextTarget {
   anchor: HTMLElement;
@@ -82,6 +115,17 @@ const densityMetrics = computed(() => props.density === 'compact'
       spacing: 7,
       cellHorizontalPadding: 14,
     });
+
+const columnSizer = new AutoColumnSizer<CharacterSummaryView>({
+  api: () => gridApi.value,
+  root: () => gridRoot.value,
+  fontSize: () => densityMetrics.value.fontSize,
+  horizontalPadding: () => densityMetrics.value.cellHorizontalPadding,
+  onManualColumnsChanged: () => {
+    const state = gridApi.value?.getState();
+    if (state) scheduleStateWrite(state);
+  },
+});
 
 const gridTheme = computed(() => {
   const colors = props.dark
@@ -144,7 +188,7 @@ function gameClass(system: string): string {
 function gameRenderer(params: ICellRendererParams<CharacterSummaryView, string>): HTMLElement {
   const badge = document.createElement('span');
   badge.className = ['pfxp-game', gameClass(params.value ?? '')].filter(Boolean).join(' ');
-  badge.textContent = params.value || 'Unknown';
+  badge.textContent = params.valueFormatted || params.value || 'Unknown';
   return badge;
 }
 
@@ -155,11 +199,9 @@ function xpRenderer(params: ICellRendererParams<CharacterSummaryView, number>): 
   return value;
 }
 
-function numericLevel(value: number | string | undefined): number | null {
+function numericLevel(value: number | null | undefined): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'string' || value.trim() === '') return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  return null;
 }
 
 function parseDate(value?: string): Date | null {
@@ -171,12 +213,7 @@ function parseDate(value?: string): Date | null {
 }
 
 function formatLastPlayed(value?: string): string {
-  const date = parseDate(value);
-  return date ? dateFormatter.format(date) : '—';
-}
-
-function numberOrDash(params: ValueFormatterParams<CharacterSummaryView, number | null>): string {
-  return params.value == null || !Number.isFinite(params.value) ? '—' : String(params.value);
+  return formatShortDate(value) || '—';
 }
 
 const columnDefs: ColDef<CharacterSummaryView>[] = [
@@ -185,8 +222,8 @@ const columnDefs: ColDef<CharacterSummaryView>[] = [
     field: 'name',
     headerName: 'Character',
     filter: 'agTextColumnFilter',
-    flex: 1,
-    minWidth: 180,
+    minWidth: 28,
+    width: 190,
     pinned: 'left',
     tooltipField: 'name',
   },
@@ -196,7 +233,10 @@ const columnDefs: ColDef<CharacterSummaryView>[] = [
     headerName: 'Game system',
     filter: 'agTextColumnFilter',
     cellRenderer: gameRenderer,
-    minWidth: 170,
+    valueFormatter: ({ value }) => props.density === 'compact'
+      ? compactGameSystem(String(value ?? ''))
+      : String(value ?? ''),
+    minWidth: 28,
     width: 190,
   },
   {
@@ -207,7 +247,7 @@ const columnDefs: ColDef<CharacterSummaryView>[] = [
     cellRenderer: xpRenderer,
     sort: 'desc',
     type: 'numericColumn',
-    minWidth: 92,
+    minWidth: 28,
     width: 100,
   },
   {
@@ -215,11 +255,15 @@ const columnDefs: ColDef<CharacterSummaryView>[] = [
     headerName: 'Level',
     filter: 'agNumberColumnFilter',
     filterValueGetter: ({ data }) => numericLevel(data?.effectiveLevel),
-    getQuickFilterText: ({ data }) => String(data?.effectiveLevel ?? ''),
+    getQuickFilterText: ({ data }) => data
+      ? formatEffectiveLevel(data.totalXp, data.gameSystem as Parameters<typeof formatEffectiveLevel>[1])
+      : '',
     valueGetter: ({ data }) => numericLevel(data?.effectiveLevel),
-    valueFormatter: numberOrDash,
+    valueFormatter: ({ data }) => data
+      ? formatEffectiveLevel(data.totalXp, data.gameSystem as Parameters<typeof formatEffectiveLevel>[1])
+      : 'N/A',
     type: 'numericColumn',
-    minWidth: 96,
+    minWidth: 28,
     width: 104,
   },
   {
@@ -228,7 +272,7 @@ const columnDefs: ColDef<CharacterSummaryView>[] = [
     headerName: 'Sessions',
     filter: 'agNumberColumnFilter',
     type: 'numericColumn',
-    minWidth: 112,
+    minWidth: 28,
     width: 120,
   },
   {
@@ -238,9 +282,12 @@ const columnDefs: ColDef<CharacterSummaryView>[] = [
     filter: 'agDateColumnFilter',
     filterValueGetter: ({ data }) => parseDate(data?.lastPlayed),
     comparator: (left, right) => (parseDate(left)?.getTime() ?? 0) - (parseDate(right)?.getTime() ?? 0),
-    getQuickFilterText: ({ value }) => `${String(value ?? '')} ${formatLastPlayed(value)}`,
+    getQuickFilterText: ({ data }) => {
+      const value = data?.lastPlayed;
+      return `${String(value ?? '')} ${formatLastPlayed(value)}`;
+    },
     valueFormatter: ({ value }) => formatLastPlayed(value),
-    minWidth: 142,
+    minWidth: 28,
     width: 154,
   },
   {
@@ -249,7 +296,7 @@ const columnDefs: ColDef<CharacterSummaryView>[] = [
     headerName: 'Org ID',
     filter: 'agNumberColumnFilter',
     type: 'numericColumn',
-    minWidth: 112,
+    minWidth: 28,
     width: 124,
   },
   {
@@ -258,14 +305,14 @@ const columnDefs: ColDef<CharacterSummaryView>[] = [
     headerName: 'Character ID',
     filter: 'agNumberColumnFilter',
     type: 'numericColumn',
-    minWidth: 126,
+    minWidth: 28,
     width: 138,
   },
 ];
 
 const defaultColDef = computed<ColDef<CharacterSummaryView>>(() => ({
   filter: true,
-  floatingFilter: true,
+  floatingFilter: floatingFiltersVisible.value,
   lockPinned: false,
   resizable: true,
   sortable: true,
@@ -286,6 +333,9 @@ const getRowId: GetRowIdFunc<CharacterSummaryView> = ({ data }) => data.key;
 let persistenceEnabled = false;
 let stateTimer: ReturnType<typeof setTimeout> | undefined;
 let pendingState: GridState | undefined;
+let suppressPresetCustomization = true;
+let presetCustomized = props.preset === 'custom';
+let lastFilteredCount = -1;
 
 function persistableState(state: GridState): GridState {
   const {
@@ -299,9 +349,18 @@ function persistableState(state: GridState): GridState {
 
 async function hydrateState(): Promise<void> {
   try {
-    const stored = await characterPreferences.getItem<unknown>(STATE_KEY);
+    const stored = await characterPreferences.getItem<unknown>(STATE_KEY)
+      ?? await characterPreferences.getItem<unknown>(LEGACY_STATE_KEY);
     if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
-      persistedState.value = stored as GridState;
+      const candidate = stored as Partial<StoredCharacterGridState>;
+      if (candidate.state && typeof candidate.state === 'object') {
+        persistedState.value = candidate.state;
+        restoredManualColumns.value = Array.isArray(candidate.manualColumns)
+          ? candidate.manualColumns.filter((value): value is string => typeof value === 'string')
+          : [];
+      } else {
+        persistedState.value = stored as GridState;
+      }
     }
   } catch (error) {
     console.warn('Unable to restore character grid preferences.', error);
@@ -312,7 +371,10 @@ async function hydrateState(): Promise<void> {
 
 async function writeState(state: GridState): Promise<void> {
   try {
-    await characterPreferences.setItem(STATE_KEY, persistableState(state));
+    await characterPreferences.setItem<StoredCharacterGridState>(STATE_KEY, {
+      state: persistableState(state),
+      manualColumns: columnSizer.getManualColumns(),
+    });
   } catch (error) {
     console.warn('Unable to save character grid preferences.', error);
   }
@@ -330,9 +392,174 @@ function scheduleStateWrite(state: GridState): void {
   }, 320);
 }
 
+function releasePresetSuppression(): void {
+  requestAnimationFrame(() => {
+    suppressPresetCustomization = false;
+  });
+}
+
+function markPresetCustomized(): void {
+  if (suppressPresetCustomization || presetCustomized) return;
+  presetCustomized = true;
+  emit('presetCustomized');
+}
+
+function emitFilteredCount(api: GridApi<CharacterSummaryView>): void {
+  const count = api.getDisplayedRowCount();
+  if (count === lastFilteredCount) return;
+  lastFilteredCount = count;
+  emit('filteredCount', count);
+}
+
+function applyPreset(preset: CharacterPreset): boolean {
+  const api = gridApi.value;
+  if (!api || preset === 'custom') return false;
+  suppressPresetCustomization = true;
+  presetCustomized = false;
+  const visible = new Set<CharacterColumnId>(CHARACTER_PRESET_COLUMNS[preset]);
+  const applied = api.applyColumnState({
+    applyOrder: true,
+    state: CHARACTER_COLUMN_ORDER.map((colId) => ({ colId, hide: !visible.has(colId) })),
+  });
+  scheduleStateWrite(api.getState());
+  columnSizer.schedule();
+  releasePresetSuppression();
+  return applied;
+}
+
+function getColumns(): Array<{ id: string; label: string; visible: boolean }> {
+  const api = gridApi.value;
+  if (!api) return CHARACTER_COLUMN_ORDER.map((id) => ({
+    id,
+    label: CHARACTER_COLUMN_LABELS[id],
+    visible: CHARACTER_PRESET_COLUMNS.default.includes(id),
+  }));
+  return api.getAllGridColumns().map((column) => ({
+    id: column.getColId(),
+    label: columnLabel(api, column),
+    visible: column.isVisible(),
+  }));
+}
+
+function setColumnVisible(id: string, visible: boolean): boolean {
+  const api = gridApi.value;
+  const column = api?.getColumn(id);
+  if (!api || !column) return false;
+  if (!visible && api.getAllDisplayedColumns().length <= 1) return false;
+  api.setColumnsVisible([column], visible);
+  markPresetCustomized();
+  scheduleStateWrite(api.getState());
+  if (visible) columnSizer.schedule();
+  return true;
+}
+
+function moveColumn(id: string, index: number): boolean {
+  const api = gridApi.value;
+  const column = api?.getColumn(id);
+  if (!api || !column) return false;
+  const target = Math.max(0, Math.min(CHARACTER_COLUMN_ORDER.length - 1, Math.trunc(index)));
+  api.moveColumns([column], target);
+  markPresetCustomized();
+  scheduleStateWrite(api.getState());
+  return true;
+}
+
+function autoSizeColumns(): void {
+  columnSizer.fitAllColumns();
+  const state = gridApi.value?.getState();
+  if (state) scheduleStateWrite(state);
+}
+
+function fitColumns(): void {
+  const api = gridApi.value;
+  if (!api) return;
+  columnSizer.markDisplayedColumnsManual();
+  api.sizeColumnsToFit();
+  markPresetCustomized();
+  scheduleStateWrite(api.getState());
+}
+
+function setFloatingFilters(visible: boolean): boolean {
+  if (floatingFiltersVisible.value === visible) return visible;
+  floatingFiltersVisible.value = visible;
+  const api = gridApi.value;
+  void nextTick(() => {
+    if (!api || api !== gridApi.value) return;
+    api.setGridOption('defaultColDef', defaultColDef.value);
+    api.refreshHeader();
+  });
+  return visible;
+}
+
+function clearFilters(): void {
+  const api = gridApi.value;
+  if (!api) return;
+  api.setFilterModel(null);
+  emit('filterModelChanged', {});
+  scheduleStateWrite(api.getState());
+}
+
+function resetGrid(): void {
+  const api = gridApi.value;
+  if (!api) return;
+  suppressPresetCustomization = true;
+  presetCustomized = false;
+  api.resetColumnState();
+  api.setFilterModel(null);
+  api.deselectAll();
+  columnSizer.setManualColumns([]);
+  applyPreset('default');
+  emit('filterModelChanged', {});
+  emitFilteredCount(api);
+  columnSizer.schedule();
+  scheduleStateWrite(api.getState());
+}
+
+function getCurrentRows(): CharacterSummaryView[] {
+  const api = gridApi.value;
+  if (!api) return [...props.rows];
+  const rows: CharacterSummaryView[] = [];
+  api.forEachNodeAfterFilterAndSort((node) => {
+    if (node.data) rows.push(node.data);
+  });
+  return rows;
+}
+
+function getExportView(): TableExportView | null {
+  const api = gridApi.value;
+  return api ? getGridTableExportView(api, 'Characters') : null;
+}
+
+function exportCsv(fileName = 'pfxp-characters.csv'): void {
+  const view = getExportView();
+  if (view) downloadTableViewCsv(view, fileName);
+}
+
+async function exportXlsx(fileName = 'pfxp-characters.xlsx'): Promise<void> {
+  const view = getExportView();
+  if (!view) return;
+  try {
+    await downloadTableViewXlsx(view, fileName);
+  } catch {
+    $q.notify({ message: 'Unable to create the Excel workbook.', color: 'negative', icon: 'r_error' });
+  }
+}
+
+function resize(): void {
+  requestAnimationFrame(() => {
+    gridApi.value?.refreshHeader();
+    gridApi.value?.redrawRows();
+  });
+}
+
 function onGridReady(event: GridReadyEvent<CharacterSummaryView>): void {
   gridApi.value = event.api;
   event.api.setGridAriaProperty('label', 'Character XP summary');
+  columnSizer.setManualColumns(restoredManualColumns.value, false);
+  if (!persistedState.value && props.preset !== 'custom') applyPreset(props.preset);
+  else releasePresetSuppression();
+  emitFilteredCount(event.api);
+  columnSizer.schedule();
   requestAnimationFrame(() => {
     persistenceEnabled = true;
   });
@@ -340,6 +567,40 @@ function onGridReady(event: GridReadyEvent<CharacterSummaryView>): void {
 
 function onStateUpdated(event: StateUpdatedEvent<CharacterSummaryView>): void {
   scheduleStateWrite(event.state);
+}
+
+function onFirstDataRendered(event: FirstDataRenderedEvent<CharacterSummaryView>): void {
+  emitFilteredCount(event.api);
+  columnSizer.schedule();
+}
+
+function onModelUpdated(event: ModelUpdatedEvent<CharacterSummaryView>): void {
+  emitFilteredCount(event.api);
+  columnSizer.schedule();
+}
+
+function onFilterChanged(event: FilterChangedEvent<CharacterSummaryView>): void {
+  emit('filterModelChanged', event.api.getFilterModel());
+  emitFilteredCount(event.api);
+  columnSizer.schedule();
+}
+
+function onColumnResized(event: ColumnResizedEvent<CharacterSummaryView>): void {
+  if (!event.finished) return;
+  if (event.source === 'uiColumnResized') {
+    const columns = event.columns ?? (event.column ? [event.column] : []);
+    columnSizer.markManual(columns.map((column) => column.getColId()));
+  }
+  if (event.source === 'uiColumnResized') markPresetCustomized();
+}
+
+function onColumnMoved(event: ColumnMovedEvent<CharacterSummaryView>): void {
+  if (event.finished && event.source.startsWith('ui')) markPresetCustomized();
+}
+
+function onColumnVisible(event: ColumnVisibleEvent<CharacterSummaryView>): void {
+  if (event.source.startsWith('ui') || event.source === 'columnMenu') markPresetCustomized();
+  if (event.visible !== false) columnSizer.schedule();
 }
 
 function onSelectionChanged(event: SelectionChangedEvent<CharacterSummaryView>): void {
@@ -610,6 +871,17 @@ const contextActions = computed<ContextMenuAction[]>(() => {
       icon: 'r_restart_alt',
       caption: 'Restore default order, widths, visibility, pins, and sort',
     },
+    {
+      id: 'export',
+      label: 'Export current view',
+      caption: 'Visible columns and filtered/sorted rows',
+      icon: 'r_download',
+      separatorBefore: true,
+      children: [
+        { id: 'export-csv', label: 'CSV', icon: 'r_table_view' },
+        { id: 'export-xlsx', label: 'Excel XLSX', icon: 'r_grid_on' },
+      ],
+    },
   );
 
   return actions;
@@ -677,6 +949,7 @@ function onGridKeyDown(event: KeyboardEvent): void {
 }
 
 function persistContextMutation(api: GridApi<CharacterSummaryView>): void {
+  markPresetCustomized();
   scheduleStateWrite(api.getState());
   contextRevision.value += 1;
 }
@@ -800,14 +1073,15 @@ function onContextAction(id: string): void {
       break;
     case 'auto-size-column':
       if (!column) return;
-      api.autoSizeColumns([column], false);
+      columnSizer.fitColumn(column.getColId());
       persistContextMutation(api);
       break;
     case 'auto-size-all':
-      api.autoSizeAllColumns(false);
+      columnSizer.fitAllColumns();
       persistContextMutation(api);
       break;
     case 'fit-viewport':
+      columnSizer.markDisplayedColumnsManual();
       api.sizeColumnsToFit();
       persistContextMutation(api);
       break;
@@ -816,11 +1090,21 @@ function onContextAction(id: string): void {
       persistContextMutation(api);
       break;
     case 'reset-columns':
-      api.resetColumnState();
-      persistContextMutation(api);
+      resetGrid();
+      break;
+    case 'export-csv':
+      exportCsv();
+      break;
+    case 'export-xlsx':
+      void exportXlsx();
       break;
   }
 }
+
+watch(() => props.preset, (preset) => {
+  presetCustomized = preset === 'custom';
+  if (preset !== 'custom') applyPreset(preset);
+});
 
 watch(densityMetrics, (metrics) => {
   const api = gridApi.value;
@@ -829,6 +1113,8 @@ watch(densityMetrics, (metrics) => {
   api.setGridOption('headerHeight', metrics.headerHeight);
   api.setGridOption('floatingFiltersHeight', metrics.floatingFilterHeight);
   api.resetRowHeights();
+  api.refreshCells({ force: true });
+  columnSizer.schedule();
 });
 
 onMounted(() => {
@@ -843,12 +1129,31 @@ onBeforeUnmount(() => {
   const finalState = pendingState ?? gridApi.value?.getState();
   pendingState = undefined;
   if (finalState) void writeState(finalState);
+  columnSizer.destroy();
   gridApi.value = null;
+});
+
+defineExpose({
+  applyPreset,
+  autoSizeColumns,
+  clearFilters,
+  exportCsv,
+  exportXlsx,
+  fitColumns,
+  getColumns,
+  getCurrentRows,
+  getExportView,
+  moveColumn,
+  reset: resetGrid,
+  resize,
+  setColumnVisible,
+  setFloatingFilters,
 });
 </script>
 
 <template>
   <div
+    ref="gridRoot"
     class="character-grid"
     @contextmenu.capture="onNativeContextMenu"
     @keydown.capture="onGridKeyDown"
@@ -860,7 +1165,6 @@ onBeforeUnmount(() => {
       v-else
       class="character-grid__table"
       :animate-rows="false"
-      :cache-quick-filter="true"
       :column-defs="columnDefs"
       :default-col-def="defaultColDef"
       dom-layout="normal"
@@ -868,11 +1172,9 @@ onBeforeUnmount(() => {
       :floating-filters-height="densityMetrics.floatingFilterHeight"
       :get-row-id="getRowId"
       :header-height="densityMetrics.headerHeight"
-      :include-hidden-columns-in-quick-filter="true"
       :initial-state="persistedState"
       :maintain-column-order="true"
       :overlay-no-rows-template="'No characters match the current filters.'"
-      :quick-filter-text="normalizedQuery"
       :row-buffer="12"
       :row-data="rows"
       :row-height="densityMetrics.rowHeight"
@@ -885,7 +1187,13 @@ onBeforeUnmount(() => {
       :tooltip-hide-delay="5000"
       :tooltip-show-delay="350"
       @cell-key-down="onCellKeyDown"
+      @column-moved="onColumnMoved"
+      @column-resized="onColumnResized"
+      @column-visible="onColumnVisible"
+      @filter-changed="onFilterChanged"
+      @first-data-rendered="onFirstDataRendered"
       @grid-ready="onGridReady"
+      @model-updated="onModelUpdated"
       @selection-changed="onSelectionChanged"
       @state-updated="onStateUpdated"
     />

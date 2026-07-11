@@ -3,6 +3,7 @@ import type { Browser, Page } from 'playwright';
 import { cpus } from 'os';
 import type { Character, SessionDetail, PaizoOrganizedPlayData } from './types';
 import { isAlreadyPlayedSessionNote } from './session-rules';
+import { createPaizoAccountIdentity } from './account';
 
 // Engine names we launch (Firefox-only)
 type EngineName = 'firefox';
@@ -300,7 +301,7 @@ export class PaizoScraper {
       const summary = this.calculateSummary(details);
 
       update('done');
-      return { characters, details, summary };
+      return { account: createPaizoAccountIdentity(task.email), characters, details, summary };
     } catch (err: any) {
       // Log full Playwright error details to stderr and keep the page alive for inspection
       console.error(err?.stack || err);
@@ -691,15 +692,14 @@ export class PaizoScraper {
           // Determine game system per rules
           const gameSystem = this.determineGameSystem(charid, scenario, playerText);
 
-          // Paizo reports duplicate credit in Notes; omit only the explicit prefix.
+          // Paizo reports duplicate credit in Notes. Keep the audit row but do
+          // not award XP; the UI renders it muted and can filter zero-XP rows.
           const notes = await cells[11]?.textContent() || null;
-          if (isAlreadyPlayedSessionNote(notes)) {
-            console.log(`DEBUG: Skipping already-played session: ${scenario.trim()}`);
-            continue;
-          }
 
           // Calculate XP (respecting system-specific rules)
-          const xp = this.calculateXP(scenario, prestigePoints, pointsText, gameSystem);
+          const xp = isAlreadyPlayedSessionNote(notes)
+            ? 0
+            : this.calculateXP(scenario, prestigePoints, pointsText, gameSystem);
 
           console.log(`DEBUG: Adding session: ${date} ${scenario}`);
 
@@ -790,7 +790,7 @@ export class PaizoScraper {
     }
 
     if (gameSystem === 'Starfinder Playtest') {
-      return 0; // ignored in general, but safe value
+      return 0; // retained for audit/history, but never rewarded
     }
 
     // Fallbacks based on points text markers

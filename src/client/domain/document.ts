@@ -11,6 +11,7 @@ import {
   type ValidationResult,
 } from './models';
 import { isAlreadyPlayedSessionNote } from '../../session-rules';
+import { createPaizoAccountIdentity, type PaizoAccountIdentity } from '../../account';
 
 const gameSystems = new Set<string>(GAME_SYSTEMS);
 
@@ -104,6 +105,20 @@ function readCharacter(reader: DocumentReader, value: unknown, path: string): Ch
     faction: reader.string(reader.required(item, 'faction', path), `${path}.faction`),
     game: reader.gameSystem(reader.required(item, 'game', path), `${path}.game`),
   };
+}
+
+function readAccount(
+  reader: DocumentReader,
+  value: unknown,
+  path: string,
+): PaizoAccountIdentity | undefined {
+  if (value === undefined) return undefined;
+  const item = reader.record(value, path) ?? {};
+  const email = reader.string(reader.required(item, 'email', path), `${path}.email`);
+  const key = reader.string(reader.required(item, 'key', path), `${path}.key`);
+  const identity = createPaizoAccountIdentity(email);
+  if (key !== identity.key) reader.issue(`${path}.key`, 'Expected canonical account email key');
+  return identity;
 }
 
 function readSession(reader: DocumentReader, value: unknown, path: string): SessionDetail {
@@ -214,16 +229,22 @@ export function validatePfxpDocument(input: unknown): ValidationResult<PfxpDocum
   const root = reader.record(input, '$') ?? {};
   const rawDetails = reader.array(reader.required(root, 'details', '$'), '$.details') ?? [];
   const rawCharacters = reader.array(reader.required(root, 'characters', '$'), '$.characters') ?? [];
-  const details = rawDetails
-    .map((item, index) => readSession(reader, item, `$.details[${index}]`))
-    .filter((session) => !isAlreadyPlayedSessionNote(session.notes));
+  const parsedDetails = rawDetails
+    .map((item, index) => readSession(reader, item, `$.details[${index}]`));
+  const hadAlreadyPlayedRows = parsedDetails.some((session) =>
+    isAlreadyPlayedSessionNote(session.notes) && session.xp !== 0);
+  const details = parsedDetails.map((session) => isAlreadyPlayedSessionNote(session.notes)
+    ? { ...session, xp: 0 }
+    : session);
   const summary = readLegacySummary(reader, reader.required(root, 'summary', '$'), '$.summary');
+  const account = readAccount(reader, root.account, '$.account');
   const value: PfxpDocument = {
+    ...(account ? { account } : {}),
     characters: rawCharacters.map((item, index) =>
       readCharacter(reader, item, `$.characters[${index}]`),
     ),
     details,
-    summary: details.length === rawDetails.length ? summary : summarizeSessions(details),
+    summary: hadAlreadyPlayedRows ? summarizeSessions(details) : summary,
   };
 
   return reader.issues.length > 0
@@ -276,10 +297,36 @@ export function characterKey(
 /** Calculate the fractional effective level used by organized play. */
 export function effectiveLevel(totalXp: number, game: GameSystem): number | null {
   let xpPerLevel: number;
-  if (game === 'Pathfinder 2e' || game === 'Starfinder 2e') xpPerLevel = 12;
+  if (game === 'Pathfinder 2e' || game === 'Starfinder 2e' || game === 'Starfinder Playtest') xpPerLevel = 12;
   else if (game === 'Pathfinder 1e' || game === 'Starfinder 1e') xpPerLevel = 3;
   else return null;
   return Math.round((1 + totalXp / xpPerLevel) * 100) / 100;
+}
+
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = Math.abs(Math.trunc(left));
+  let b = Math.abs(Math.trunc(right));
+  while (b) [a, b] = [b, a % b];
+  return a || 1;
+}
+
+/** Whole level plus reduced plain-text progress fraction. */
+export function formatEffectiveLevel(totalXp: number, game: GameSystem): string {
+  const xpPerLevel = game === 'Pathfinder 2e'
+    || game === 'Starfinder 2e'
+    || game === 'Starfinder Playtest'
+    ? 12
+    : game === 'Pathfinder 1e' || game === 'Starfinder 1e'
+      ? 3
+      : null;
+  if (!xpPerLevel || !Number.isFinite(totalXp)) return 'N/A';
+
+  const roundedXp = Math.max(0, Math.round(totalXp));
+  const level = 1 + Math.floor(roundedXp / xpPerLevel);
+  const remainder = roundedXp % xpPerLevel;
+  if (!remainder) return String(level);
+  const divisor = greatestCommonDivisor(remainder, xpPerLevel);
+  return `${level} ${remainder / divisor}/${xpPerLevel / divisor}`;
 }
 
 function laterDate(current: string | null, candidate: string | undefined): string | null {

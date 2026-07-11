@@ -12,7 +12,8 @@ Source of truth: The TypeScript in `src/scraper.ts` and `src/server.ts` defines 
 - **`src/scraper.ts`** - Core Playwright scraper class managing Firefox browser pools, page navigation, session parsing, and XP calculations
 - **`src/types.ts`** - TypeScript type definitions for characters, sessions, API requests/responses, and internal state management
 - **`src/cli.ts`** - Command-line interface for direct scraping to JSON files with environment variable credential handling
-- **`public/index.html`** - Single-page application UI with Bootstrap styling, dual AG Grid grids, persistent state, quick/fuzzy filtering, and client-side logic
+- **`src/client/`** - Vue 3 + Quasar single-page application with dual AG Grid grids, persistent state, account/run history, filtering, and export logic
+- **`public/index.html`** / **`public/assets/`** - Vite build output served by the Bun server
 
 ### Configuration Files
 - **`package.json`** - Project dependencies, scripts, and Bun module configuration
@@ -39,7 +40,7 @@ Source of truth: The TypeScript in `src/scraper.ts` and `src/server.ts` defines 
 - Browser automation: Playwright (Firefox-only)
 - Server: `index.ts` imports `src/server.ts` and starts a Bun HTTP server.
 - Scraper: `src/scraper.ts` manages a pool of Firefox browsers and schedules flows concurrently.
-- UI: `public/index.html` (Bootstrap + AG Grid Community), served as static files by the Bun server.
+- UI: Vue 3 + Quasar + AG Grid Community source under `src/client`, built by Vite into `public` and served by the Bun server.
 
 ### Concurrency model
 
@@ -73,7 +74,9 @@ Source of truth: The TypeScript in `src/scraper.ts` and `src/server.ts` defines 
    - Use the visible `next >` link when present, with 10-second delays between page transitions.
    - Verify successful page navigation by checking pagination indicators.
    - For each page, collect rows with date, GM, scenario, points, event ID/name, session number, player/org/char IDs, character/faction, prestige/reputation, notes.
-   - Skip sessions with em-dash/no points, Starfinder Playtest entries, or those marked "already played".
+   - Keep rows with blank/em-dash points and Starfinder Playtest entries; Playtest rows receive zero XP.
+   - Skip rows only when the prestige/reputation cell itself is blank or an em dash.
+   - Retain rows whose notes begin with "player has already played", force their XP reward to zero, and expose them to the UI's gray-row treatment and no-XP filter.
 
 5) Compute XP per row using game system-specific rules and aggregate per-character summaries:
    - Bounty scenarios: 1 XP
@@ -95,13 +98,15 @@ The exact selectors, checks, and waits used here match the implementation in `sr
 ## UI behavior
 
 - Two AG Grid data grids: sessions (detailed) and character summary (aggregated XP and effective level).
-- Built-in AG Grid features used: column resizing/reorder/visibility, sorting, filtering, virtualization, CSV export, and Quick Filter (global text filter).
+- Both grids expose the same controls for column resizing/reorder/visibility, sorting, filtering, search, density, saved views, CSV/XLSX export, and fullscreen mode.
 - Fuzzy search chips (Fuse.js) integrated via AG Grid external filter API with AND/OR combination and a global suggestions datalist.
-- Column state persistence (order, visibility, widths, sort) saved in IndexedDB via localForage using AG Grid’s column state APIs.
-- Custom column visibility menu accessible via header click with a "Select All" toggle.
-- "Previous Runs" dropdown stores up to 25 unique JSON results (by SHA-256 hash) from both API fetches and file loads, showing timestamp and source.
-- Resizable sections with drag handles between grids with persistent height preferences and fullscreen toggle per card.
-- Dark/light theme toggle switches between `ag-theme-quartz` and `ag-theme-quartz-dark` and adjusts Bootstrap variables.
+- Independent grid state (order, visibility, widths, sort, filters, density, saved view, and active table) is saved in IndexedDB via localForage.
+- Columns auto-fit the header and longest currently filtered value until the user deliberately resizes them; auto-fit can be restored from the toolbar or context menu.
+- Right-click on desktop and long-press on mobile expose contextual table and column actions.
+- Current-view CSV/XLSX exports preserve displayed column order and filtered/sorted row order.
+- Previous Runs retains every fetched or imported run, groups them by canonicalized Paizo account, and loads the newest run at startup.
+- Account switching is available at runtime. Account keys remove Unicode whitespace and fold case while preserving distinct `+` aliases.
+- Dark/light theme toggle switches Quasar colors and AG Grid Quartz color schemes.
 
 ## Notes for implementers
 

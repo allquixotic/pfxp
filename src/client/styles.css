@@ -14,6 +14,7 @@
   --pfxp-danger: #c73545;
   --pfxp-header-height: 64px;
   --pfxp-tab-height: 58px;
+  --pfxp-run-height: 40px;
   --pfxp-control-height: 44px;
   --pfxp-radius: 8px;
   --pfxp-shadow: 0 16px 42px rgba(24, 33, 49, 0.14);
@@ -119,15 +120,49 @@ textarea {
 }
 
 .pfxp-tabs-wrap {
-  height: var(--pfxp-tab-height);
+  height: calc(var(--pfxp-tab-height) + var(--pfxp-run-height));
   padding: 0 14px;
   background: var(--pfxp-surface);
   border-bottom: 1px solid var(--pfxp-border);
 }
 
+.pfxp-active-run {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--pfxp-run-height);
+  min-width: 0;
+  color: var(--pfxp-muted);
+  gap: 14px;
+  font-size: 12px;
+}
+
+.pfxp-active-run > div {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+}
+
+.pfxp-active-run strong {
+  color: var(--pfxp-text);
+  white-space: nowrap;
+}
+
+.pfxp-active-run span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pfxp-active-run time {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
 .pfxp-tabs {
   width: max-content;
-  height: 100%;
+  height: var(--pfxp-tab-height);
 }
 
 .pfxp-tabs .q-tab {
@@ -157,11 +192,37 @@ textarea {
 .pfxp-page {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--pfxp-header-height) - var(--pfxp-tab-height));
+  height: calc(100vh - var(--pfxp-header-height) - var(--pfxp-tab-height) - var(--pfxp-run-height));
   min-height: 0;
   padding: 0;
   background: var(--pfxp-surface);
 }
+
+.column-menu {
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  color: var(--pfxp-text);
+  background: var(--pfxp-surface);
+  border: 1px solid var(--pfxp-border);
+  border-radius: 9px;
+  box-shadow: var(--pfxp-shadow);
+}
+
+.column-menu__header,
+.column-menu__footer,
+.column-menu__presets {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  gap: 6px;
+  border-bottom: 1px solid var(--pfxp-border);
+}
+
+.column-menu__header { justify-content: space-between; }
+.column-menu__presets .q-btn { flex: 1 1 0; min-height: 34px; border-radius: 6px; font-size: 12px; }
+.column-menu__search { padding: 4px 12px; border-bottom: 1px solid var(--pfxp-border); }
+.column-menu__list { height: min(420px, 48vh); }
+.column-menu__footer { justify-content: flex-end; border-top: 1px solid var(--pfxp-border); border-bottom: 0; }
 
 .pfxp-toolbar {
   display: grid;
@@ -519,7 +580,18 @@ textarea {
   }
 
   .pfxp-page {
-    height: calc(100vh - var(--pfxp-header-height) - var(--pfxp-tab-height));
+    height: calc(100vh - var(--pfxp-header-height) - var(--pfxp-tab-height) - var(--pfxp-run-height));
+  }
+
+  .pfxp-active-run {
+    gap: 8px;
+  }
+
+  .pfxp-active-run time {
+    max-width: 42%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .pfxp-toolbar {

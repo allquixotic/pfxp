@@ -1,5 +1,6 @@
 import type { UserData, QueueItem, FetchRequest, FetchResponse, ProgressEvent } from './types';
 import { PaizoScraper } from './scraper';
+import { canonicalizePaizoEmail } from './account';
 
 // Security: strict Content Security Policy for all responses
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'";
@@ -166,7 +167,7 @@ async function processQueue() {
 
 async function startItem(item: QueueItem) {
   runningCount++;
-  const emailLower = item.email.toLowerCase();
+  const emailLower = canonicalizePaizoEmail(item.email);
   // Update progress: now processing
   pushProgress(item.jobId, { jobId: item.jobId, status: 'processing', message: 'Starting…' });
 
@@ -324,7 +325,8 @@ const server = Bun.serve({
     if (url.pathname === '/api/fetch' && req.method === 'POST') {
       try {
         const body = await req.json() as FetchRequest;
-        const emailLower = body.email.toLowerCase();
+        const emailLower = canonicalizePaizoEmail(body.email);
+        if (!emailLower) return jsonWithCsp({ error: 'Missing email' }, { status: 400 });
 
         // Resolve password: prefer encrypted credential
         let password: string | undefined;
@@ -389,7 +391,7 @@ const server = Bun.serve({
         const queuePosition = processingQueue.length; // position before pushing
         processingQueue.push({
           jobId,
-          email: body.email,
+          email: emailLower,
           password,
           queuedAt: Date.now()
         });
@@ -414,7 +416,7 @@ const server = Bun.serve({
     if (url.pathname === '/api/status' && req.method === 'POST') {
       try {
         const body = await req.json() as { email: string };
-        const emailLower = body.email.toLowerCase();
+        const emailLower = canonicalizePaizoEmail(body.email);
         
         const user = userData.get(emailLower);
         if (!user) {

@@ -1,3 +1,5 @@
+import type { PaizoAccountIdentity } from './account';
+
 // Character model from the characters page
 export interface Character {
   orgplayid: number;
@@ -47,6 +49,7 @@ export interface CharacterSummary {
 
 // Complete data structure
 export interface PaizoOrganizedPlayData {
+  account?: PaizoAccountIdentity;
   details: SessionDetail[];
   characters: Character[];
   summary: Record<string, CharacterSummary>;

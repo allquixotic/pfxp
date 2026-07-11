@@ -18,6 +18,7 @@ const props = defineProps<{
   characterOptions: string[];
   matchCount: number;
   floatingFilters: boolean;
+  excludeNoXp: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -29,6 +30,7 @@ const emit = defineEmits<{
   'update:role': [value: RoleFilter];
   'update:dateRange': [value: DateRangeFilter];
   'update:floatingFilters': [value: boolean];
+  'update:excludeNoXp': [value: boolean];
   reset: [];
 }>();
 
@@ -185,6 +187,12 @@ function filterCharacters(value: string, update: (callback: () => void) => void)
             label="Date range"
             :options="dateOptions"
             @update:model-value="emit('update:dateRange', $event)"
+          />
+          <q-checkbox
+            :model-value="excludeNoXp"
+            color="primary"
+            label="Exclude events with no XP reward"
+            @update:model-value="emit('update:excludeNoXp', $event === true)"
           />
         </section>
 

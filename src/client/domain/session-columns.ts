@@ -5,6 +5,7 @@ import type {
 } from 'ag-grid-community';
 
 import type { SessionDetail } from './models';
+import { compactGameSystem, compactScenarioName, formatShortDate } from './display-format';
 
 export const SESSION_COLUMN_ORDER = [
   'date',
@@ -126,10 +127,11 @@ function makeBadge(label: string, className: string): HTMLSpanElement {
 }
 
 function systemRenderer(params: ICellRendererParams<SessionDetail, string>): HTMLSpanElement | string {
-  const value = text(params.value);
-  if (!value) return '';
+  const rawValue = text(params.value);
+  const value = text(params.valueFormatted ?? params.value);
+  if (!rawValue) return '';
 
-  const tone = value.toLowerCase().includes('starfinder')
+  const tone = rawValue.toLowerCase().includes('starfinder')
     ? 'starfinder'
     : value.toLowerCase().includes('pathfinder')
       ? 'pathfinder'
@@ -168,14 +170,19 @@ export function getSessionRowId(detail: SessionDetail): string {
  * initial visibility; widths, ordering, sorting, filtering, resizing, and
  * pinning remain normal AG Grid state and are persisted by SessionsGrid.
  */
-export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColDef<SessionDetail>[] {
+export function createSessionColumnDefs(
+  preset: SessionPreset = 'default',
+  options: { compact?: () => boolean } = {},
+): ColDef<SessionDetail>[] {
   const hidden = (id: SessionColumnId) => !isVisibleForPreset(id, preset);
+  const compact = () => options.compact?.() === true;
 
   return [
     {
       colId: 'date',
       headerName: 'Date',
       valueGetter: ({ data }) => data?.date,
+      valueFormatter: ({ value }) => compact() ? formatShortDate(value) : text(value),
       cellDataType: 'dateString',
       filter: 'agDateColumnFilter',
       filterParams: {
@@ -187,8 +194,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       sort: 'desc',
       sortIndex: 0,
       width: 126,
-      minWidth: 112,
-      maxWidth: 176,
+      minWidth: 28,
       hide: hidden('date'),
       tooltipValueGetter: ({ value }) => text(value),
     },
@@ -200,7 +206,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       filter: 'agTextColumnFilter',
       filterParams: TEXT_FILTER_PARAMS,
       width: 196,
-      minWidth: 142,
+      minWidth: 28,
       hide: hidden('character.name'),
       tooltipValueGetter: ({ data, value }) => {
         if (!data) return text(value);
@@ -216,8 +222,9 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       filter: 'agTextColumnFilter',
       filterParams: TEXT_FILTER_PARAMS,
       cellRenderer: systemRenderer,
+      valueFormatter: ({ value }) => compact() ? compactGameSystem(text(value)) : text(value),
       width: 172,
-      minWidth: 148,
+      minWidth: 28,
       hide: hidden('gameSystem'),
       tooltipValueGetter: ({ value }) => text(value),
     },
@@ -228,8 +235,9 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       cellDataType: 'text',
       filter: 'agTextColumnFilter',
       filterParams: TEXT_FILTER_PARAMS,
+      valueFormatter: ({ value }) => compact() ? compactScenarioName(text(value)) : text(value),
       width: 330,
-      minWidth: 210,
+      minWidth: 28,
       hide: hidden('scenario'),
       tooltipValueGetter: ({ value }) => text(value),
     },
@@ -243,8 +251,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       valueFormatter: formatNumber,
       type: 'numericColumn',
       width: 88,
-      minWidth: 76,
-      maxWidth: 118,
+      minWidth: 28,
       hide: hidden('xp'),
     },
     {
@@ -255,7 +262,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       filter: 'agTextColumnFilter',
       filterParams: TEXT_FILTER_PARAMS,
       width: 180,
-      minWidth: 132,
+      minWidth: 28,
       hide: hidden('gm'),
       tooltipValueGetter: ({ value }) => text(value),
     },
@@ -274,8 +281,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       filterParams: TEXT_FILTER_PARAMS,
       cellRenderer: gmCreditRenderer,
       width: 96,
-      minWidth: 88,
-      maxWidth: 122,
+      minWidth: 28,
       hide: hidden('prestigeReputation.isGM'),
     },
     {
@@ -286,7 +292,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       filter: 'agTextColumnFilter',
       filterParams: TEXT_FILTER_PARAMS,
       width: 240,
-      minWidth: 170,
+      minWidth: 28,
       hide: hidden('event.name'),
       tooltipValueGetter: ({ data, value }) => data
         ? `${text(value)}\nEvent ID ${data.event.id}`
@@ -300,7 +306,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       filter: 'agTextColumnFilter',
       filterParams: TEXT_FILTER_PARAMS,
       width: 190,
-      minWidth: 138,
+      minWidth: 28,
       hide: hidden('faction.name'),
       tooltipValueGetter: ({ value }) => text(value),
     },
@@ -312,7 +318,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       filter: 'agTextColumnFilter',
       filterParams: TEXT_FILTER_PARAMS,
       width: 300,
-      minWidth: 190,
+      minWidth: 28,
       hide: hidden('notes'),
       tooltipValueGetter: ({ value }) => text(value),
     },
@@ -326,7 +332,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       valueFormatter: formatNumber,
       type: 'numericColumn',
       width: 120,
-      minWidth: 102,
+      minWidth: 28,
       hide: hidden('event.id'),
     },
     {
@@ -339,7 +345,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       valueFormatter: formatNumber,
       type: 'numericColumn',
       width: 116,
-      minWidth: 98,
+      minWidth: 28,
       hide: hidden('session'),
     },
     {
@@ -352,7 +358,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       valueFormatter: formatNumber,
       type: 'numericColumn',
       width: 162,
-      minWidth: 138,
+      minWidth: 28,
       hide: hidden('player.orgplayid'),
     },
     {
@@ -365,7 +371,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       valueFormatter: formatNumber,
       type: 'numericColumn',
       width: 132,
-      minWidth: 112,
+      minWidth: 28,
       hide: hidden('player.charid'),
     },
     {
@@ -378,7 +384,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       valueFormatter: formatNumber,
       type: 'numericColumn',
       width: 148,
-      minWidth: 126,
+      minWidth: 28,
       hide: hidden('prestigeReputation.prestigePoints'),
     },
     {
@@ -391,7 +397,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       valueFormatter: formatNumber,
       type: 'numericColumn',
       width: 170,
-      minWidth: 148,
+      minWidth: 28,
       hide: hidden('points.achievementPoints'),
     },
     {
@@ -404,7 +410,7 @@ export function createSessionColumnDefs(preset: SessionPreset = 'default'): ColD
       valueFormatter: formatNumber,
       type: 'numericColumn',
       width: 130,
-      minWidth: 112,
+      minWidth: 28,
       hide: hidden('points.gmCredits'),
     },
   ];

@@ -2,7 +2,13 @@
 import { computed, ref } from 'vue';
 import { copyToClipboard, useQuasar } from 'quasar';
 
-import type { SessionDetail } from '../domain';
+import {
+  compactGameSystem,
+  compactScenarioName,
+  formatShortDate,
+  type SessionDetail,
+} from '../domain';
+import { isAlreadyPlayedSessionNote } from '../../session-rules';
 import ContextActionMenu from './ContextActionMenu.vue';
 import type { ContextMenuAction } from './context-menu-model';
 
@@ -13,8 +19,10 @@ const props = withDefaults(defineProps<{
   rows: SessionDetail[];
   sort: MobileSort;
   hasFilters?: boolean;
+  density?: 'compact' | 'comfortable';
 }>(), {
   hasFilters: false,
+  density: 'comfortable',
 });
 
 const emit = defineEmits<{
@@ -87,10 +95,19 @@ const contextActions = computed<ContextMenuAction[]>(() => {
 });
 
 function formatDate(value?: string) {
+  if (props.density === 'compact') return formatShortDate(value) || 'Date unavailable';
   if (!value) return 'Date unavailable';
   const parsed = new Date(`${value}T00:00:00`);
   if (Number.isNaN(parsed.valueOf())) return value;
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: '2-digit', year: 'numeric' }).format(parsed);
+}
+
+function displayScenario(value: string): string {
+  return props.density === 'compact' ? compactScenarioName(value) : value;
+}
+
+function displayGame(value: string): string {
+  return props.density === 'compact' ? compactGameSystem(value) : value;
 }
 
 function gameClass(system: string) {
@@ -151,7 +168,7 @@ function handleContextAction(id: string) {
       v-if="rows.length"
       class="mobile-sessions__scroll"
       :items="rows"
-      :virtual-scroll-item-size="128"
+      :virtual-scroll-item-size="density === 'compact' ? 112 : 128"
       v-slot="{ item }"
       @scroll.passive="contextMenu?.close()"
     >
@@ -161,6 +178,10 @@ function handleContextAction(id: string) {
         v-ripple
         v-touch-hold:500:12="touchHandler(item)"
         class="mobile-session"
+        :class="{
+          'mobile-session--compact': density === 'compact',
+          'mobile-session--already-played': isAlreadyPlayedSessionNote(item.notes),
+        }"
         :aria-label="`${item.scenario || 'Untitled session'}, ${item.character.name || 'unknown character'}. Open details or use long press for actions.`"
         @click="emit('select', item)"
         @contextmenu.prevent.stop="openContext($event, item, 'pointer')"
@@ -168,10 +189,10 @@ function handleContextAction(id: string) {
       >
         <q-item-section>
           <q-item-label caption class="mobile-session__date">{{ formatDate(item.date) }}</q-item-label>
-          <q-item-label class="mobile-session__scenario" lines="2">{{ item.scenario || 'Untitled session' }}</q-item-label>
+          <q-item-label class="mobile-session__scenario" lines="2">{{ displayScenario(item.scenario) || 'Untitled session' }}</q-item-label>
           <div class="mobile-session__meta">
             <span><q-icon name="r_person" /> {{ item.character.name || `Character ${item.player.charid ?? '—'}` }}</span>
-            <span :class="['pfxp-game', gameClass(item.gameSystem)]">{{ item.gameSystem }}</span>
+            <span :class="['pfxp-game', gameClass(item.gameSystem)]">{{ displayGame(item.gameSystem) }}</span>
           </div>
         </q-item-section>
         <q-item-section side class="mobile-session__side">
@@ -217,6 +238,22 @@ function handleContextAction(id: string) {
   padding: 14px;
   border-bottom: 1px solid var(--pfxp-border);
   -webkit-touch-callout: none;
+}
+
+.mobile-session--compact {
+  min-height: 112px;
+  padding-block: 10px;
+}
+
+.mobile-session--already-played {
+  color: #6b7280;
+  background: #eef1f4;
+  filter: saturate(0.35);
+}
+
+:global(.body--dark) .mobile-session--already-played {
+  color: #929cac;
+  background: #1b2430;
 }
 
 .mobile-session:focus-visible {

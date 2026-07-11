@@ -7,6 +7,8 @@ import {
   sanitizeCsvValue,
   serializeCsv,
   serializeFullDocument,
+  tableViewCsv,
+  tableViewXlsxBlob,
 } from './export';
 
 describe('export helpers', () => {
@@ -44,5 +46,20 @@ describe('export helpers', () => {
 
   test('removes unsafe filename characters', () => {
     expect(safeFilename('../pfxp:run?.json')).toBe('-pfxp-run-.json');
+  });
+
+  test('writes visible columns and rows to CSV and a real XLSX zip', async () => {
+    const view = {
+      sheetName: 'Sessions',
+      columns: [
+        { id: 'scenario', header: 'Scenario', widthPx: 240 },
+        { id: 'xp', header: 'XP', widthPx: 70 },
+      ],
+      rows: [['Visible row', 4]],
+    };
+    expect(tableViewCsv(view)).toContain('"Visible row","4"');
+    const blob = await tableViewXlsxBlob(view);
+    expect(blob.type).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect(new TextDecoder().decode((await blob.arrayBuffer()).slice(0, 2))).toBe('PK');
   });
 });

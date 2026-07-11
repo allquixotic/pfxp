@@ -26,6 +26,19 @@ export interface CsvColumn<Row> {
   value: (row: Row) => unknown;
 }
 
+export interface TableExportColumn {
+  id: string;
+  header: string;
+  widthPx?: number;
+}
+
+/** Live browser table view: visible columns in order, filtered/sorted rows. */
+export interface TableExportView {
+  sheetName: string;
+  columns: TableExportColumn[];
+  rows: unknown[][];
+}
+
 /** CSV serialization options. */
 export interface CsvOptions {
   includeBom?: boolean;
@@ -187,4 +200,63 @@ export function downloadCsv<Row>(
   filename = 'pfxp-export.csv',
 ): void {
   downloadBlob(csvBlob(rows, columns), filename);
+}
+
+export function tableViewCsv(view: TableExportView): string {
+  return serializeCsv(
+    view.rows,
+    view.columns.map((column, index) => ({
+      header: column.header,
+      value: (row: unknown[]) => row[index],
+    })),
+  );
+}
+
+export function downloadTableViewCsv(
+  view: TableExportView,
+  filename = 'pfxp-view.csv',
+): void {
+  downloadBlob(new Blob([tableViewCsv(view)], { type: 'text/csv;charset=utf-8' }), filename);
+}
+
+function xlsxValue(value: unknown): string | number | boolean | Date | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : '';
+  if (typeof value === 'boolean' || value instanceof Date) return value;
+  return sanitizeCsvValue(value);
+}
+
+export function tableViewSheetData(view: TableExportView) {
+  return [
+    view.columns.map((column) => ({
+      value: column.header,
+      fontWeight: 'bold' as const,
+      backgroundColor: '#E9EEF5',
+      bottomBorderColor: '#BCC8D8',
+      bottomBorderStyle: 'thin' as const,
+    })),
+    ...view.rows.map((row) => view.columns.map((_, index) => xlsxValue(row[index]))),
+  ];
+}
+
+/** Build an Office Open XML workbook from the exact current table view. */
+export async function tableViewXlsxBlob(view: TableExportView): Promise<Blob> {
+  const { default: writeExcelFile } = await import('write-excel-file/browser');
+  return writeExcelFile(tableViewSheetData(view), {
+    sheet: view.sheetName.slice(0, 31) || 'PFXP',
+    stickyRowsCount: 1,
+    columns: view.columns.map((column) => ({
+      width: Math.max(8, Math.min(120, Math.round((column.widthPx ?? 112) / 7))),
+    })),
+  }, {
+    fontFamily: 'Aptos',
+    fontSize: 11,
+  }).toBlob();
+}
+
+export async function downloadTableViewXlsx(
+  view: TableExportView,
+  filename = 'pfxp-view.xlsx',
+): Promise<void> {
+  downloadBlob(await tableViewXlsxBlob(view), safeFilename(filename, 'pfxp-view.xlsx'));
 }

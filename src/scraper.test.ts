@@ -39,7 +39,7 @@ function row({
     </tr>`;
 }
 
-test('session parser reads plain-text scenarios and excludes already-played note prefixes', async () => {
+test('session parser reads plain-text scenarios and keeps already-played rows at zero XP', async () => {
   const page = await browser.newPage();
   try {
     await page.setContent(`
@@ -74,11 +74,13 @@ test('session parser reads plain-text scenarios and excludes already-played note
 
     const sessions = await parseSessions(page, []);
 
-    expect(sessions).toHaveLength(2);
+    expect(sessions).toHaveLength(3);
     expect(sessions.map((session) => session.scenario)).toEqual([
       'SFS2 #1-23: Psychic Echoes',
+      'PFS(2ed) #7-09: The Chitterwood Walks',
       'PFS(2ed) #7-15: Within Antiquated Halls',
     ]);
+    expect(sessions.map((session) => session.xp)).toEqual([4, 0, 4]);
   } finally {
     await page.close();
   }

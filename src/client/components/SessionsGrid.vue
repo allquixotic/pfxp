@@ -21,6 +21,7 @@ import {
   type GridApi,
   type GridReadyEvent,
   type GridState,
+  type RowClassParams,
   type ModelUpdatedEvent,
   type RowSelectionOptions,
   type SelectionChangedEvent,
@@ -28,6 +29,7 @@ import {
 } from 'ag-grid-community';
 
 import type { SessionDetail } from '../domain';
+import { isAlreadyPlayedSessionNote } from '../../session-rules';
 import ContextActionMenu from './ContextActionMenu.vue';
 import type { ContextMenuAction, ContextMenuTrigger } from './context-menu-model';
 import {
@@ -39,7 +41,13 @@ import {
   type SessionColumnId,
   type SessionPreset,
 } from '../domain/session-columns';
-import { safeFilename, sanitizeCsvValue } from '../services/export';
+import {
+  AutoColumnSizer,
+  downloadTableViewCsv,
+  downloadTableViewXlsx,
+  getGridTableExportView,
+  type TableExportView,
+} from '../services';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -50,6 +58,7 @@ const props = withDefaults(defineProps<{
   density: 'compact' | 'comfortable';
   preset: SessionPreset;
   initialState?: GridState;
+  initialManualColumns?: string[];
 }>(), {
   quickFilter: '',
   dark: false,
@@ -65,6 +74,7 @@ const emit = defineEmits<{
   presetCustomized: [];
   filterModelChanged: [model: FilterModel];
   floatingFiltersChanged: [visible: boolean];
+  manualColumnsChanged: [columns: string[]];
 }>();
 
 interface ContextActionMenuApi {
@@ -88,13 +98,23 @@ interface TouchHoldDetails {
 
 const $q = useQuasar();
 const initialPreset = props.preset;
-const columnDefs = createSessionColumnDefs(initialPreset);
+const columnDefs = createSessionColumnDefs(initialPreset, {
+  compact: () => props.density === 'compact',
+});
 const gridApi = shallowRef<GridApi<SessionDetail> | null>(null);
 const floatingFiltersVisible = ref(false);
 const gridRoot = ref<HTMLElement | null>(null);
 const contextMenu = ref<ContextActionMenuApi | null>(null);
 const contextTarget = shallowRef<GridContextTarget | null>(null);
 const contextRevision = ref(0);
+const columnSizer = new AutoColumnSizer<SessionDetail>({
+  api: () => gridApi.value,
+  root: () => gridRoot.value,
+  fontSize: () => densityMetrics.value.fontSize,
+  horizontalPadding: () => densityMetrics.value.cellHorizontalPadding,
+  manualColumns: props.initialManualColumns,
+  onManualColumnsChanged: (columns) => emit('manualColumnsChanged', columns),
+});
 
 const densityMetrics = computed(() => props.density === 'compact'
   ? {
@@ -246,14 +266,17 @@ function onGridReady(event: GridReadyEvent<SessionDetail>): void {
   } else {
     releaseCustomizationSuppression();
   }
+  columnSizer.schedule();
 }
 
 function onFirstDataRendered(event: FirstDataRenderedEvent<SessionDetail>): void {
   emitFilteredCount(event.api);
+  columnSizer.schedule();
 }
 
 function onModelUpdated(event: ModelUpdatedEvent<SessionDetail>): void {
   emitFilteredCount(event.api);
+  columnSizer.schedule();
 }
 
 function onSelectionChanged(event: SelectionChangedEvent<SessionDetail>): void {
@@ -264,6 +287,7 @@ function onFilterChanged(event: FilterChangedEvent<SessionDetail>): void {
   emit('filterModelChanged', event.api.getFilterModel());
   emitFilteredCount(event.api);
   contextRevision.value += 1;
+  columnSizer.schedule();
 }
 
 function onStateUpdated(event: StateUpdatedEvent<SessionDetail>): void {
@@ -276,11 +300,17 @@ function onColumnMoved(event: ColumnMovedEvent<SessionDetail>): void {
 }
 
 function onColumnResized(event: ColumnResizedEvent<SessionDetail>): void {
-  if (event.finished && isUserColumnEvent(event.source)) markPresetCustomized();
+  if (!event.finished) return;
+  if (event.source === 'uiColumnResized') {
+    const columns = event.columns ?? (event.column ? [event.column] : []);
+    columnSizer.markManual(columns.map((column) => column.getColId()));
+  }
+  if (isUserColumnEvent(event.source)) markPresetCustomized();
 }
 
 function onColumnVisible(event: ColumnVisibleEvent<SessionDetail>): void {
   if (isUserColumnEvent(event.source)) markPresetCustomized();
+  if (event.visible !== false) columnSizer.schedule();
 }
 
 function onColumnPinned(event: ColumnPinnedEvent<SessionDetail>): void {
@@ -310,7 +340,7 @@ function applyPreset(preset: SessionPreset): boolean {
 function autoSizeColumns(): void {
   const api = gridApi.value;
   if (!api) return;
-  api.autoSizeAllColumns(false);
+  columnSizer.fitAllColumns();
   markPresetCustomized();
   scheduleStateChanged(api.getState());
   contextRevision.value += 1;
@@ -319,6 +349,7 @@ function autoSizeColumns(): void {
 function fitColumns(): void {
   const api = gridApi.value;
   if (!api) return;
+  columnSizer.markDisplayedColumnsManual();
   api.sizeColumnsToFit();
   markPresetCustomized();
   scheduleStateChanged(api.getState());
@@ -334,6 +365,7 @@ function resetGrid(): void {
   api.resetColumnState();
   api.setFilterModel(null);
   api.deselectAll();
+  columnSizer.setManualColumns([]);
 
   const visible = new Set<SessionColumnId>(SESSION_PRESET_COLUMNS.default);
   api.applyColumnState({
@@ -348,14 +380,28 @@ function resetGrid(): void {
   emit('filterModelChanged', {});
   emitFilteredCount(api);
   scheduleStateChanged(api.getState());
+  columnSizer.schedule();
   releaseCustomizationSuppression();
 }
 
 function exportCsv(fileName = 'pfxp-sessions.csv'): void {
-  gridApi.value?.exportDataAsCsv({
-    fileName: safeFilename(fileName, 'pfxp-sessions.csv'),
-    processCellCallback: ({ value }) => sanitizeCsvValue(value),
-  });
+  const view = getExportView();
+  if (view) downloadTableViewCsv(view, fileName);
+}
+
+async function exportXlsx(fileName = 'pfxp-sessions.xlsx'): Promise<void> {
+  const view = getExportView();
+  if (!view) return;
+  try {
+    await downloadTableViewXlsx(view, fileName);
+  } catch {
+    $q.notify({ message: 'Unable to create the Excel workbook.', color: 'negative', icon: 'r_error' });
+  }
+}
+
+function getExportView(): TableExportView | null {
+  const api = gridApi.value;
+  return api ? getGridTableExportView(api, 'Sessions') : null;
 }
 
 function getCurrentRows(): SessionDetail[] {
@@ -658,7 +704,7 @@ function showOnlyContextColumn(colId: SessionColumnId): void {
 function autoSizeContextColumn(colId: SessionColumnId): void {
   const api = gridApi.value;
   if (!api?.getColumn(colId)) return;
-  api.autoSizeColumns([colId], false);
+  columnSizer.fitColumn(colId);
   commitContextCustomization(api);
 }
 
@@ -797,6 +843,7 @@ function onContextAction(id: string): void {
     return;
   }
   if (id === 'export:csv') exportCsv('pfxp-sessions.csv');
+  if (id === 'export:xlsx') void exportXlsx('pfxp-sessions.xlsx');
 }
 
 const contextMenuTitle = computed(() => {
@@ -976,11 +1023,15 @@ const contextMenuActions = computed<ContextMenuAction[]>(() => {
       ],
     },
     {
-      id: 'export:csv',
-      label: 'Export current CSV',
-      caption: 'Current sorted and filtered rows',
+      id: 'export',
+      label: 'Export current view',
+      caption: 'Visible columns and filtered/sorted rows',
       icon: 'r_download',
       separatorBefore: true,
+      children: [
+        { id: 'export:csv', label: 'CSV', icon: 'r_table_view' },
+        { id: 'export:xlsx', label: 'Excel XLSX', icon: 'r_grid_on' },
+      ],
     },
   );
 
@@ -999,7 +1050,9 @@ watch(densityMetrics, (metrics) => {
   api.setGridOption('headerHeight', metrics.headerHeight);
   api.setGridOption('floatingFiltersHeight', metrics.floatingFilterHeight);
   api.resetRowHeights();
+  api.refreshCells({ force: true });
   resize();
+  columnSizer.schedule();
 });
 
 onBeforeUnmount(() => {
@@ -1010,6 +1063,7 @@ onBeforeUnmount(() => {
   const finalState = pendingState ?? gridApi.value?.getState();
   pendingState = undefined;
   if (finalState) emit('stateChanged', finalState);
+  columnSizer.destroy();
   gridApi.value = null;
 });
 
@@ -1018,10 +1072,12 @@ defineExpose({
   autoSizeColumns,
   clearFilters,
   exportCsv,
+  exportXlsx,
   fitColumns,
   getAllRows,
   getColumns,
   getCurrentRows,
+  getExportView,
   getState,
   moveColumn,
   pinColumn,
@@ -1032,6 +1088,12 @@ defineExpose({
   setFloatingFilters,
   toggleFloatingFilters,
 });
+
+function getRowClass(params: RowClassParams<SessionDetail>): string | undefined {
+  return isAlreadyPlayedSessionNote(params.data?.notes)
+    ? 'session-row--already-played'
+    : undefined;
+}
 </script>
 
 <template>
@@ -1057,6 +1119,7 @@ defineExpose({
       :enable-cell-text-selection="true"
       :floating-filters-height="densityMetrics.floatingFilterHeight"
       :get-row-id="getRowId"
+      :get-row-class="getRowClass"
       :header-height="densityMetrics.headerHeight"
       :include-hidden-columns-in-quick-filter="true"
       :initial-state="initialState"
@@ -1131,6 +1194,28 @@ defineExpose({
   min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.sessions-grid :deep(.ag-row.session-row--already-played .ag-cell) {
+  color: #6b7280;
+  background: #eef1f4;
+}
+
+.sessions-grid :deep(.ag-row.session-row--already-played:hover .ag-cell),
+.sessions-grid :deep(.ag-row.session-row--already-played.ag-row-selected .ag-cell) {
+  color: #596273;
+  background: #e2e6eb;
+}
+
+.sessions-grid--dark :deep(.ag-row.session-row--already-played .ag-cell) {
+  color: #8d98a8;
+  background: #1b2430;
+}
+
+.sessions-grid--dark :deep(.ag-row.session-row--already-played:hover .ag-cell),
+.sessions-grid--dark :deep(.ag-row.session-row--already-played.ag-row-selected .ag-cell) {
+  color: #aab3c0;
+  background: #242f3d;
 }
 
 @media (pointer: coarse) {

@@ -3,6 +3,7 @@ import {
   aggregateCharacterSummaries,
   characterKey,
   effectiveLevel,
+  formatEffectiveLevel,
   parsePfxpDocument,
   validatePfxpDocument,
 } from './document';
@@ -49,7 +50,7 @@ describe('PFXP document domain', () => {
     }
   });
 
-  test('omits already-played sessions from loaded documents', () => {
+  test('keeps already-played rows but normalizes their XP to zero', () => {
     const parsed = parsePfxpDocument({
       characters: [],
       details: [
@@ -68,8 +69,10 @@ describe('PFXP document domain', () => {
 
     expect(parsed.details.map((detail) => detail.scenario)).toEqual([
       'Keep me',
+      'Duplicate credit',
       'Keep later mention',
     ]);
+    expect(parsed.details.map((detail) => detail.xp)).toEqual([4, 0, 4]);
     expect(parsed.summary).toEqual({ Echo: { xp: 8 } });
   });
 
@@ -97,7 +100,10 @@ describe('PFXP document domain', () => {
     expect(effectiveLevel(6, 'Starfinder 1e')).toBe(3);
     expect(effectiveLevel(18, 'Pathfinder 2e')).toBe(2.5);
     expect(effectiveLevel(18, 'Starfinder 2e')).toBe(2.5);
-    expect(effectiveLevel(18, 'Starfinder Playtest')).toBeNull();
+    expect(effectiveLevel(18, 'Starfinder Playtest')).toBe(2.5);
+    expect(formatEffectiveLevel(41, 'Pathfinder 2e')).toBe('4 5/12');
+    expect(formatEffectiveLevel(18, 'Pathfinder 2e')).toBe('2 1/2');
+    expect(formatEffectiveLevel(6, 'Starfinder 1e')).toBe('3');
   });
 
   test('aggregates by org ID, character ID, and game instead of name', () => {
