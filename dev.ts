@@ -1,21 +1,25 @@
-// Dev script that runs both the client bundler (watch) and the server (watch)
-// using Bun.spawn so `bun run dev` manages both.
+// Dev script that runs the Quasar/Vite client build in watch mode and the Bun
+// server in watch mode so production exercises the same static asset path.
 
 import { generateBuildInfo } from './scripts/build-info.ts';
 
 const { id: buildId, timestamp: buildTimestamp } = await generateBuildInfo({ tag: 'dev', quiet: true });
 console.log(`PFXP dev build: ${buildId} (${buildTimestamp})`);
 
-// Reset index.html to un-hashed asset paths for dev each time
-await Bun.spawn({
-  cmd: ["bun", "run", "scripts/postbuild.ts"],
+// Produce a complete first build before the server starts serving public/.
+const initialBuild = Bun.spawn({
+  cmd: ["bun", "run", "vite", "build", "--mode", "development"],
   stdout: "inherit",
   stderr: "inherit",
-  env: { ...process.env, RESET: "1" },
-}).exited;
+  env: { ...process.env, BUILD_ID: buildId },
+});
+
+if (await initialBuild.exited !== 0) {
+  process.exit(1);
+}
 
 const client = Bun.spawn({
-  cmd: ["bun", "build", "src/client/app.ts", "--outdir=public/assets", "--minify", "--target=browser", "--sourcemap=external", "--watch", "--splitting"],
+  cmd: ["bun", "run", "vite", "build", "--watch", "--mode", "development"],
   stdout: "inherit",
   stderr: "inherit",
   env: { ...process.env, BUILD_ID: buildId },

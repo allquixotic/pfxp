@@ -1,9 +1,0 @@
-/* Hide selection checkboxes (row and header) */
-.ag-selection-checkbox, .ag-header-select-all, .ag-center-cols-container .ag-cell .ag-selection-checkbox { display: none !important; }
-
-/* Make the bottom summary table non-interactive */
-#summaryCard table th, #summaryCard table td { user-select: text; }
-#summaryCard table { font-size: 0.9rem; }
-
-/* When page scroll is enabled, ensure grid expands naturally */
-/* We'll toggle ag-layout-auto-height on the grid theme container via JS */

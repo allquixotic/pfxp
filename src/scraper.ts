@@ -2,6 +2,7 @@ import { firefox } from 'playwright';
 import type { Browser, Page } from 'playwright';
 import { cpus } from 'os';
 import type { Character, SessionDetail, PaizoOrganizedPlayData } from './types';
+import { isAlreadyPlayedSessionNote } from './session-rules';
 
 // Engine names we launch (Firefox-only)
 type EngineName = 'firefox';
@@ -617,7 +618,7 @@ export class PaizoScraper {
       for (let i = 1; i < sessionRows.length; i++) { // Skip header row
         const cells = await sessionRows[i]?.$$('td') || [];
 
-        if (cells.length >= 11) {
+        if (cells.length >= 12) {
           // Parse date
           const dateElement = await cells[0]?.$('time');
           const dateStr = await dateElement?.getAttribute('datetime') || '';
@@ -627,9 +628,8 @@ export class PaizoScraper {
           const gmElement = await cells[1]?.$('a');
           const gm = await gmElement?.textContent() || '';
 
-          // Parse scenario  
-          const scenarioElement = await cells[2]?.$('a');
-          const scenario = await scenarioElement?.textContent() || '';
+          // Paizo renders some newer scenarios as plain text instead of links.
+          const scenario = await cells[2]?.textContent() || '';
 
           // Include Starfinder Playtest scenarios; XP will be 0 per rules
 
@@ -691,16 +691,15 @@ export class PaizoScraper {
           // Determine game system per rules
           const gameSystem = this.determineGameSystem(charid, scenario, playerText);
 
-          // Calculate XP (respecting system-specific rules)
-          let xp = this.calculateXP(scenario, prestigePoints, pointsText, gameSystem);
-             // Parse notes
+          // Paizo reports duplicate credit in Notes; omit only the explicit prefix.
           const notes = await cells[11]?.textContent() || null;
-          
-          // If the notes indicate this was already played, keep the row and force 0 XP
-          if (notes && /already played/i.test(notes)) {
-            console.log(`DEBUG: Already played - forcing 0 XP for: ${scenario}`);
-            xp = 0;
+          if (isAlreadyPlayedSessionNote(notes)) {
+            console.log(`DEBUG: Skipping already-played session: ${scenario.trim()}`);
+            continue;
           }
+
+          // Calculate XP (respecting system-specific rules)
+          const xp = this.calculateXP(scenario, prestigePoints, pointsText, gameSystem);
 
           console.log(`DEBUG: Adding session: ${date} ${scenario}`);
 

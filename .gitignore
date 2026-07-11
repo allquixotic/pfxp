@@ -27,6 +27,7 @@ output.json
 .claude/
 
 # Generated assets
+public/assets/*
 public/assets/app-*.js
 public/assets/app-*.js.map
 public/assets/app.*.js

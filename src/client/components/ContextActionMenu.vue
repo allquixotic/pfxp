@@ -177,6 +177,10 @@ function onMenuKeydown(event: KeyboardEvent): void {
         event.preventDefault();
         event.stopPropagation();
         leaveChildren();
+      } else {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
       }
       break;
     case 'Tab':
