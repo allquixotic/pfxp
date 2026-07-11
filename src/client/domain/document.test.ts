@@ -93,6 +93,47 @@ describe('PFXP document domain', () => {
     expect(parsed.summary).toEqual({ Echo: { xp: 4 } });
   });
 
+  test('V14,V16: recalculates saved Bounties and Izo IV level from session rules', () => {
+    const izoSession = (scenario: string, sequence: number): SessionDetail => session({
+      scenario,
+      gameSystem: 'Starfinder 1e',
+      session: sequence,
+      player: { orgplayid: 42, charid: 701 },
+      character: { name: 'Izo IV' },
+      faction: { name: 'Starfinder' },
+      prestigeReputation: { prestigePoints: scenario.includes('Bounty') ? 0 : 2, isGM: 'no' },
+      xp: 1,
+    });
+    const details = [
+      ...Array.from({ length: 10 }, (_, index) =>
+        izoSession(`Starfinder Society Scenario #${index + 1}: Standard Credit`, index + 1)),
+      izoSession('Starfinder Bounty #1: The Cantina Job', 11),
+      izoSession('Starfinder Bounty #3: A Green Place', 12),
+    ];
+
+    const parsed = parsePfxpDocument({
+      characters: [],
+      details,
+      summary: { 'Izo IV': { xp: 12 } },
+    });
+    const izo = aggregateCharacterSummaries(parsed).find((row) => row.character === 'Izo IV');
+
+    expect(parsed.details.slice(-2).map((detail) => detail.xp)).toEqual([0.25, 0.25]);
+    expect(parsed.summary).toEqual({ 'Izo IV': { xp: 10.5 } });
+    expect(izo).toMatchObject({ totalXp: 10.5, effectiveLevel: 4.5 });
+    expect(formatEffectiveLevel(izo?.totalXp ?? 0, 'Starfinder 1e')).toBe('4 1/2');
+  });
+
+  test('V14: rebuilds a stale saved summary even when every row XP is already correct', () => {
+    const parsed = parsePfxpDocument({
+      characters: [],
+      details: [session()],
+      summary: { Echo: { xp: 999 } },
+    });
+
+    expect(parsed.summary).toEqual({ Echo: { xp: 4 } });
+  });
+
   test('keeps safe GM recognition blocks, omits unsafe blocks, and accepts legacy runs', () => {
     const safeBlock: GmRecognitionBlock = {
       nodes: [
@@ -143,12 +184,11 @@ describe('PFXP document domain', () => {
     expect(() => parsePfxpDocument('{not json')).toThrow('Invalid PFXP document');
   });
 
-  test('preserves hostile summary keys without mutating object prototypes', () => {
+  test('validates then discards hostile derived-summary keys without mutating prototypes', () => {
     const parsed = parsePfxpDocument(JSON.parse(
       '{"characters":[],"details":[],"summary":{"__proto__":{"xp":1}}}',
     ));
-    expect(Object.hasOwn(parsed.summary, '__proto__')).toBe(true);
-    expect(parsed.summary.__proto__?.xp).toBe(1);
+    expect(Object.hasOwn(parsed.summary, '__proto__')).toBe(false);
     expect(({} as { xp?: number }).xp).toBeUndefined();
   });
 

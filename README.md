@@ -93,7 +93,7 @@ dotenvx run -- bun run src/cli.ts [output.json] [--headed]
 - Paizo account identities are canonicalized case-insensitively while preserving distinct `+` aliases, and accounts can be switched without losing run history.
 - Rows whose notes start with “player has already played” remain visible, receive zero XP, and are styled gray; a filter can exclude every zero-XP event.
 - Character effective levels use reduced ASCII fractions, such as `4 5/12` or `2 1/2`.
-- Responsive desktop and mobile layouts, compact scenario/date labels, and dark/light themes.
+- Responsive desktop and mobile layouts, system-free scenario labels in both densities, compact dates, and dark/light themes.
 
 ## License
 

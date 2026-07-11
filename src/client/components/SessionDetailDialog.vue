@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { copyToClipboard, useQuasar } from 'quasar';
-import type { SessionDetail } from '../domain';
+import { scenarioDisplayName, type SessionDetail } from '../domain';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -44,7 +44,7 @@ async function copy(value: unknown, label: string) {
       <div v-if="position === 'bottom'" class="detail-sheet__handle" aria-hidden="true" />
       <header class="pfxp-sheet-header detail-sheet__header">
         <div class="col">
-          <h2 class="pfxp-sheet-title">{{ session.scenario || 'Session details' }}</h2>
+          <h2 class="pfxp-sheet-title">{{ scenarioDisplayName(session.scenario) || 'Session details' }}</h2>
           <div class="pfxp-sheet-subtitle">
             {{ display(session.date) }}
             <span aria-hidden="true"> · </span>

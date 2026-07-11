@@ -27,8 +27,18 @@ class MemoryStore implements HistoryStore {
   }
 }
 
-function document(xp: number): PfxpDocument {
-  return { details: [], characters: [], summary: { Test: { xp } } };
+function document(marker: number): PfxpDocument {
+  return {
+    details: [],
+    characters: [{
+      orgplayid: 42,
+      charid: 700 + marker,
+      name: `Test ${marker}`,
+      faction: 'Test faction',
+      game: 'Starfinder 1e',
+    }],
+    summary: {},
+  };
 }
 
 describe('HistoryRepository', () => {

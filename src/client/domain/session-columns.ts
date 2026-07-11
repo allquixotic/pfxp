@@ -5,7 +5,7 @@ import type {
 } from 'ag-grid-community';
 
 import type { SessionDetail } from './models';
-import { compactGameSystem, compactScenarioName, formatShortDate } from './display-format';
+import { compactGameSystem, formatShortDate, scenarioDisplayName } from './display-format';
 
 export const SESSION_COLUMN_ORDER = [
   'date',
@@ -235,11 +235,11 @@ export function createSessionColumnDefs(
       cellDataType: 'text',
       filter: 'agTextColumnFilter',
       filterParams: TEXT_FILTER_PARAMS,
-      valueFormatter: ({ value }) => compact() ? compactScenarioName(text(value)) : text(value),
+      valueFormatter: ({ value }) => scenarioDisplayName(text(value)),
       width: 330,
       minWidth: 28,
       hide: hidden('scenario'),
-      tooltipValueGetter: ({ value }) => text(value),
+      tooltipValueGetter: ({ value }) => scenarioDisplayName(text(value)),
     },
     {
       colId: 'xp',

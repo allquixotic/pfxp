@@ -89,6 +89,7 @@ Source of truth: The TypeScript in `src/scraper.ts` and `src/server.ts` defines 
    - First-edition Bounties: 1/4 XP; Quests: 1/2 XP; all other scenarios, adventures, and specials: 1 XP
    - Product classes require explicit title shapes (for example, `Pathfinder Bounty #...`); incidental words in scenario titles do not change the class
    - Starfinder Playtest and no-credit rows: 0 XP
+   - Loaded/imported runs recalculate every session XP value and summary from these rules; stored computed XP is not authoritative
 
 The exact selectors, checks, and waits used here match the implementation in `src/scraper.ts` and should be treated as authoritative.
 
@@ -107,6 +108,7 @@ The exact selectors, checks, and waits used here match the implementation in `sr
 - Columns auto-fit the header and longest currently filtered value until the user deliberately resizes them; auto-fit can be restored from the toolbar or context menu.
 - Right-click on desktop and long-press on mobile expose contextual table and column actions.
 - Current-view CSV/XLSX exports preserve displayed column order and filtered/sorted row order.
+- Scenario displays remove redundant game-system/catalog prefixes in both densities while retaining raw Paizo text in the saved document.
 - Previous Runs retains every fetched or imported run, groups them by canonicalized Paizo account, and loads the newest run at startup.
 - Sanitized GM recognition is stored in the run document and rendered below its loaded-run label. Legacy runs without recognition remain valid.
 - Account switching is available at runtime. Account keys remove Unicode whitespace and fold case while preserving distinct `+` aliases.

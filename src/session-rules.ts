@@ -1,35 +1,48 @@
 /** Paizo reports duplicate credit with this leading note text. */
 const ALREADY_PLAYED_NOTE = /^\s*player has already played/i;
 
-const ADVENTURE_PATH = /\badventure\s+path\b|\bAP\s*#/i;
+const SEGMENT_START = String.raw`(?:^|\s+[-\u2012-\u2015]\s+)`;
+const SYSTEM_PREFIX = String.raw`(?:(?:(?:pathfinder|starfinder)(?:(?:\s+society)|(?:\s+(?:first|second)\s+edition)|(?:\s+playtest)){0,3}|(?:pfs|sfs)(?:\s*\([^)]{1,20}\)|\s*[12](?:e)?)?|(?:pf|sf)(?:\s*[12]e)?(?:\s+society)?)\s+)?`;
 
-export type SessionProductClass = 'adventure-path' | 'bounty' | 'quest' | 'standard';
+export type SessionProductClass =
+  | 'adventure-path'
+  | 'bounty'
+  | 'quest'
+  | 'scenario'
+  | 'adventure'
+  | 'special'
+  | 'intro'
+  | 'one-shot'
+  | 'standard';
 
 export interface SessionXpFields {
   scenario: string;
   prestigePoints: number;
-  pointsText?: string;
   gameSystem: string;
+  notes?: string | null;
 }
 
-function hasExplicitProductShape(scenario: string, product: 'Bounty' | 'Quest'): boolean {
-  const escapedProduct = product.toLowerCase();
-  const atStart = new RegExp(
-    `^\\s*(?:(?:pathfinder|starfinder)(?:\\s+society)?\\s+)?${escapedProduct}\\b`,
+function hasExplicitProductShape(scenario: string, product: string): boolean {
+  return new RegExp(
+    `${SEGMENT_START}${SYSTEM_PREFIX}${product}(?=\\s*(?:#|:|\\(|$))`,
     'i',
-  );
-  const numberedProduct = new RegExp(
-    `\\b${escapedProduct}(?:\\s*\\([^)]{0,40}\\))?\\s*#`,
-    'i',
-  );
-  return atStart.test(scenario) || numberedProduct.test(scenario);
+  ).test(scenario);
 }
 
 /** Classify Paizo product types without matching incidental words in scenario titles. */
 export function classifySessionProduct(scenario: string): SessionProductClass {
-  if (ADVENTURE_PATH.test(scenario)) return 'adventure-path';
-  if (hasExplicitProductShape(scenario, 'Bounty')) return 'bounty';
-  if (hasExplicitProductShape(scenario, 'Quest')) return 'quest';
+  const normalized = scenario.trim();
+  if (hasExplicitProductShape(normalized, String.raw`Adventure\s+Path`)) return 'adventure-path';
+  if (hasExplicitProductShape(normalized, 'Bounty')) return 'bounty';
+  if (hasExplicitProductShape(normalized, 'Quest')) return 'quest';
+  if (hasExplicitProductShape(normalized, 'Scenario')) return 'scenario';
+  if (hasExplicitProductShape(normalized, 'Special')) return 'special';
+  if (hasExplicitProductShape(normalized, 'Intro')) return 'intro';
+  if (hasExplicitProductShape(normalized, String.raw`One[-\s]Shot`)) return 'one-shot';
+  if (
+    hasExplicitProductShape(normalized, 'Adventure')
+    || hasExplicitProductShape(normalized, String.raw`Free\s+RPG\s+Day`)
+  ) return 'adventure';
   return 'standard';
 }
 
@@ -41,16 +54,12 @@ function gameEdition(fields: SessionXpFields): 'first' | 'second' | 'playtest' {
   if (fields.gameSystem === 'Pathfinder 2e' || fields.gameSystem === 'Starfinder 2e') {
     return 'second';
   }
-
-  const source = `${fields.scenario} ${fields.pointsText ?? ''}`;
-  if (/PFS\(2ed\)|\b(?:PFS2|SFS2)\b|(?:Pathfinder|Starfinder).*\b(?:2e|second edition)\b/i.test(source)) {
-    return 'second';
-  }
-  return 'first';
+  throw new Error(`Unsupported game system: ${fields.gameSystem}`);
 }
 
 /** Calculate XP from the explicit product class and game edition. */
 export function calculateSessionXp(fields: SessionXpFields): number {
+  if (isAlreadyPlayedSessionNote(fields.notes)) return 0;
   const edition = gameEdition(fields);
   if (edition === 'playtest') return 0;
 
@@ -64,11 +73,6 @@ export function calculateSessionXp(fields: SessionXpFields): number {
       : 0.5;
   }
   return edition === 'second' ? 4 : 1;
-}
-
-/** Repair persisted results from the retired Starfinder 2e eight-XP fallback. */
-export function normalizeLegacyEightXp(fields: SessionXpFields & { xp: number }): number {
-  return fields.xp === 8 ? calculateSessionXp(fields) : fields.xp;
 }
 
 /** True when Paizo marks a row as duplicate credit that earns no XP. */

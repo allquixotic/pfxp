@@ -4,8 +4,8 @@ import { copyToClipboard, useQuasar } from 'quasar';
 
 import {
   compactGameSystem,
-  compactScenarioName,
   formatShortDate,
+  scenarioDisplayName,
   type SessionDetail,
 } from '../domain';
 import { isAlreadyPlayedSessionNote } from '../../session-rules';
@@ -103,7 +103,7 @@ function formatDate(value?: string) {
 }
 
 function displayScenario(value: string): string {
-  return props.density === 'compact' ? compactScenarioName(value) : value;
+  return scenarioDisplayName(value);
 }
 
 function displayGame(value: string): string {
@@ -151,7 +151,7 @@ function handleContextAction(id: string) {
   else if (id === 'filter:character') emit('filterCharacter', session);
   else if (id === 'filter:game') emit('filterGame', session.gameSystem);
   else if (id === 'filter:role') emit('filterRole', session.prestigeReputation.isGM === 'yes' ? 'gm' : 'player');
-  else if (id === 'copy:scenario') void copyValue(session.scenario, 'Scenario');
+  else if (id === 'copy:scenario') void copyValue(displayScenario(session.scenario), 'Scenario');
   else if (id === 'copy:character') void copyValue(session.character.name, 'Character name');
   else if (id === 'copy:event') void copyValue(session.event.id, 'Event ID');
   else if (id === 'copy:gm') void copyValue(session.gm, 'GM name');
@@ -182,7 +182,7 @@ function handleContextAction(id: string) {
           'mobile-session--compact': density === 'compact',
           'mobile-session--already-played': isAlreadyPlayedSessionNote(item.notes),
         }"
-        :aria-label="`${item.scenario || 'Untitled session'}, ${item.character.name || 'unknown character'}. Open details or use long press for actions.`"
+        :aria-label="`${displayScenario(item.scenario) || 'Untitled session'}, ${item.character.name || 'unknown character'}. Open details or use long press for actions.`"
         @click="emit('select', item)"
         @contextmenu.prevent.stop="openContext($event, item, 'pointer')"
         @keydown="onContextKey($event, item)"
@@ -215,7 +215,7 @@ function handleContextAction(id: string) {
     <ContextActionMenu
       ref="contextMenu"
       title="Session actions"
-      :subtitle="contextSession?.scenario || 'Untitled session'"
+      :subtitle="contextSession ? displayScenario(contextSession.scenario) : 'Untitled session'"
       :actions="contextActions"
       @select="handleContextAction"
     />

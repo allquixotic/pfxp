@@ -755,7 +755,7 @@ export class PaizoScraper {
           // Calculate XP (respecting system-specific rules)
           const xp = isAlreadyPlayedSessionNote(notes)
             ? 0
-            : this.calculateXP(scenario, prestigePoints, pointsText, gameSystem);
+            : this.calculateXP(scenario, prestigePoints, gameSystem);
 
           console.log(`DEBUG: Adding session: ${date} ${scenario}`);
 
@@ -812,8 +812,8 @@ export class PaizoScraper {
     }
   }
 
-  private calculateXP(scenario: string, prestigePoints: number, pointsText: string, gameSystem: string): number {
-    return calculateSessionXp({ scenario, prestigePoints, pointsText, gameSystem });
+  private calculateXP(scenario: string, prestigePoints: number, gameSystem: string): number {
+    return calculateSessionXp({ scenario, prestigePoints, gameSystem });
   }
 
   private determineGameSystem(charid: number | null, scenario: string, playerText: string): string {

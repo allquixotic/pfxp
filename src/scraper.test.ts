@@ -18,10 +18,14 @@ function row({
   date,
   scenario,
   notes,
+  player = '100001-2001',
+  prestige = '4',
 }: {
   date: string;
   scenario: string;
   notes: string;
+  player?: string;
+  prestige?: string;
 }): string {
   return `
     <tr>
@@ -32,10 +36,10 @@ function row({
       <td>12345</td>
       <td><a>Test Event</a></td>
       <td>1</td>
-      <td>100001-2001</td>
+      <td>${player}</td>
       <td><a>Test Character</a></td>
       <td>Envoy's Alliance</td>
-      <td>4</td>
+      <td>${prestige}</td>
       <td>${notes}</td>
     </tr>`;
 }
@@ -63,6 +67,13 @@ test('session parser reads plain-text scenarios and keeps already-played rows at
             scenario: '<a>PFS(2ed) #7-15: Within Antiquated Halls</a>',
             notes: 'Review note: player has already played was entered in error.',
           })}
+          ${row({
+            date: '2024-05-24',
+            scenario: '\n        Starfinder Bounty #1: The Cantina Job\n      ',
+            notes: '',
+            player: '100001-701',
+            prestige: '0',
+          })}
         </tbody></table>
       </div>`);
 
@@ -75,13 +86,14 @@ test('session parser reads plain-text scenarios and keeps already-played rows at
 
     const sessions = await parseSessions(page, []);
 
-    expect(sessions).toHaveLength(3);
+    expect(sessions).toHaveLength(4);
     expect(sessions.map((session) => session.scenario)).toEqual([
       'SFS2 #1-23: Psychic Echoes',
       'PFS(2ed) #7-09: The Chitterwood Walks',
       'PFS(2ed) #7-15: Within Antiquated Halls',
+      'Starfinder Bounty #1: The Cantina Job',
     ]);
-    expect(sessions.map((session) => session.xp)).toEqual([4, 0, 4]);
+    expect(sessions.map((session) => session.xp)).toEqual([4, 0, 4, 0.25]);
   } finally {
     await page.close();
   }
@@ -94,7 +106,6 @@ test('V13: XP classification follows product class and never awards eight XP', (
       calculateXP(
         scenario: string,
         prestigePoints: number,
-        pointsText: string,
         gameSystem: string,
       ): number;
     }
@@ -118,7 +129,7 @@ test('V13: XP classification follows product class and never awards eight XP', (
   ];
 
   const actual = cases.map(([scenario, prestige, gameSystem]) =>
-    calculateXP(scenario, prestige, '', gameSystem));
+    calculateXP(scenario, prestige, gameSystem));
   expect(actual).toEqual(cases.map(([, , , expected]) => expected));
   expect(actual).not.toContain(8);
 });

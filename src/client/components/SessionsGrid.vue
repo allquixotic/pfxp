@@ -28,7 +28,7 @@ import {
   type StateUpdatedEvent,
 } from 'ag-grid-community';
 
-import type { SessionDetail } from '../domain';
+import { scenarioDisplayName, type SessionDetail } from '../domain';
 import { isAlreadyPlayedSessionNote } from '../../session-rules';
 import ContextActionMenu from './ContextActionMenu.vue';
 import type { ContextMenuAction, ContextMenuTrigger } from './context-menu-model';
@@ -746,7 +746,7 @@ function onContextAction(id: string): void {
     return;
   }
   if (id === 'copy:scenario' && target.row) {
-    void copyContextText(target.row.scenario, 'Scenario');
+    void copyContextText(scenarioDisplayName(target.row.scenario), 'Scenario');
     return;
   }
   if (id === 'copy:character' && target.row) {
@@ -850,7 +850,7 @@ const contextMenuTitle = computed(() => {
   const target = contextTarget.value;
   if (!target) return 'Session actions';
   if (target.kind === 'header' && target.colId) return `${contextColumnLabel(target.colId)} column`;
-  return target.row?.scenario || 'Sessions view';
+  return target.row ? scenarioDisplayName(target.row.scenario) : 'Sessions view';
 });
 
 const contextMenuSubtitle = computed(() => {

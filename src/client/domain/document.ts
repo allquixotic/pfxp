@@ -11,8 +11,7 @@ import {
   type ValidationResult,
 } from './models';
 import {
-  isAlreadyPlayedSessionNote,
-  normalizeLegacyEightXp,
+  calculateSessionXp,
 } from '../../session-rules';
 import { createPaizoAccountIdentity, type PaizoAccountIdentity } from '../../account';
 import { sanitizeGmRecognitions } from '../../gm-recognition';
@@ -235,20 +234,18 @@ export function validatePfxpDocument(input: unknown): ValidationResult<PfxpDocum
   const rawCharacters = reader.array(reader.required(root, 'characters', '$'), '$.characters') ?? [];
   const parsedDetails = rawDetails
     .map((item, index) => readSession(reader, item, `$.details[${index}]`));
-  let normalizedXp = false;
   const details = parsedDetails.map((session) => {
-    const xp = isAlreadyPlayedSessionNote(session.notes)
-      ? 0
-      : normalizeLegacyEightXp({
-        scenario: session.scenario,
-        prestigePoints: session.prestigeReputation.prestigePoints,
-        gameSystem: session.gameSystem,
-        xp: session.xp,
-      });
-    if (xp !== session.xp) normalizedXp = true;
+    const xp = calculateSessionXp({
+      scenario: session.scenario,
+      prestigePoints: session.prestigeReputation.prestigePoints,
+      gameSystem: session.gameSystem,
+      notes: session.notes,
+    });
     return xp === session.xp ? session : { ...session, xp };
   });
-  const summary = readLegacySummary(reader, reader.required(root, 'summary', '$'), '$.summary');
+  // Keep validating legacy summaries for document compatibility, but never
+  // trust a persisted derived total over the normalized session rows.
+  readLegacySummary(reader, reader.required(root, 'summary', '$'), '$.summary');
   const account = readAccount(reader, root.account, '$.account');
   const gmRecognitions = sanitizeGmRecognitions(root.gmRecognitions);
   const value: PfxpDocument = {
@@ -258,7 +255,7 @@ export function validatePfxpDocument(input: unknown): ValidationResult<PfxpDocum
       readCharacter(reader, item, `$.characters[${index}]`),
     ),
     details,
-    summary: normalizedXp ? summarizeSessions(details) : summary,
+    summary: summarizeSessions(details),
   };
 
   return reader.issues.length > 0
@@ -324,6 +321,25 @@ function greatestCommonDivisor(left: number, right: number): number {
   return a || 1;
 }
 
+function reducedFraction(value: number, maxDenominator = 96): [number, number] {
+  let bestNumerator = 0;
+  let bestDenominator = 1;
+  let bestError = Number.POSITIVE_INFINITY;
+
+  for (let denominator = 1; denominator <= maxDenominator; denominator += 1) {
+    const numerator = Math.round(value * denominator);
+    const error = Math.abs(value - numerator / denominator);
+    if (error >= bestError) continue;
+    bestNumerator = numerator;
+    bestDenominator = denominator;
+    bestError = error;
+    if (error < 1e-10) break;
+  }
+
+  const divisor = greatestCommonDivisor(bestNumerator, bestDenominator);
+  return [bestNumerator / divisor, bestDenominator / divisor];
+}
+
 /** Whole level plus reduced plain-text progress fraction. */
 export function formatEffectiveLevel(totalXp: number, game: GameSystem): string {
   const xpPerLevel = game === 'Pathfinder 2e'
@@ -335,12 +351,13 @@ export function formatEffectiveLevel(totalXp: number, game: GameSystem): string 
       : null;
   if (!xpPerLevel || !Number.isFinite(totalXp)) return 'N/A';
 
-  const roundedXp = Math.max(0, Math.round(totalXp));
-  const level = 1 + Math.floor(roundedXp / xpPerLevel);
-  const remainder = roundedXp % xpPerLevel;
-  if (!remainder) return String(level);
-  const divisor = greatestCommonDivisor(remainder, xpPerLevel);
-  return `${level} ${remainder / divisor}/${xpPerLevel / divisor}`;
+  const progress = Math.max(0, totalXp) / xpPerLevel;
+  const completedLevels = Math.floor(progress + 1e-10);
+  const level = 1 + completedLevels;
+  const [numerator, denominator] = reducedFraction(progress - completedLevels);
+  if (numerator === 0) return String(level);
+  if (numerator === denominator) return String(level + 1);
+  return `${level} ${numerator}/${denominator}`;
 }
 
 function laterDate(current: string | null, candidate: string | undefined): string | null {
