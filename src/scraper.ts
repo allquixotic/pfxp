@@ -2,7 +2,7 @@ import { firefox } from 'playwright';
 import type { Browser, Page } from 'playwright';
 import { cpus } from 'os';
 import type { Character, SessionDetail, PaizoOrganizedPlayData } from './types';
-import { isAlreadyPlayedSessionNote } from './session-rules';
+import { calculateSessionXp, isAlreadyPlayedSessionNote } from './session-rules';
 import { createPaizoAccountIdentity } from './account';
 import {
   sanitizeGmRecognitions,
@@ -813,46 +813,7 @@ export class PaizoScraper {
   }
 
   private calculateXP(scenario: string, prestigePoints: number, pointsText: string, gameSystem: string): number {
-    // Universal rules
-    if (scenario.includes('Bounty')) {
-      return 1;
-    }
-
-    if (scenario.includes('Quest')) {
-      return prestigePoints;
-    }
-
-    if (scenario.includes('AP #') || scenario.includes('Adventure Path')) {
-      return 12;
-    }
-
-    // Starfinder 2e specific rules
-    if (gameSystem === 'Starfinder 2e') {
-      if (scenario.includes('Scenario')) return 4;
-      if (scenario.match(/Adventure\s*Path|AP\s*#/i)) return 12; // already caught above, but explicit
-      return 8; // Adventure
-    }
-
-    if (gameSystem === 'Starfinder 1e') {
-      return 1;
-    }
-
-    if (gameSystem === 'Pathfinder 2e') {
-      return 4;
-    }
-
-    if (gameSystem === 'Pathfinder 1e') {
-      return 1;
-    }
-
-    if (gameSystem === 'Starfinder Playtest') {
-      return 0; // retained for audit/history, but never rewarded
-    }
-
-    // Fallbacks based on points text markers
-    if (/PFS\(2ed\)/i.test(pointsText)) return 4;
-    if (/SFS/i.test(pointsText)) return 1;
-    return 4; // Default fallback
+    return calculateSessionXp({ scenario, prestigePoints, pointsText, gameSystem });
   }
 
   private determineGameSystem(charid: number | null, scenario: string, playerText: string): string {

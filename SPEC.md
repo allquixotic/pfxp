@@ -35,6 +35,7 @@ Give Paizo Organized Play users fast, durable, account-aware session and charact
 10. Startup loads newest stored run across all accounts. Runtime account/run switching never deletes other accounts' runs.
 11. GM-recognition blocks preserve Paizo text and glyph images across saved runs, but only bounded `p`/`span`/`img` markup with validated Paizo image URLs and safe attributes may render. Unsafe, malformed, oversized, or deeply nested blocks are omitted. Legacy runs without blocks remain valid.
 12. CSP permits GM-recognition images from HTTPS `paizo.com` hosts and no other remote image origin.
+13. XP classification uses explicit product shapes, never incidental title words: Adventure Path books award 12 XP; second-edition Bounties award 1 XP, Quests award at most 2 reported XP, and all other rows award 4 XP; first-edition Bounties award 1/4 XP, Quests award 1/2 XP, and all other rows award 1 XP. Playtest and no-credit rows award zero. No single row may award 8 XP.
 
 ## §T
 
@@ -49,6 +50,7 @@ Give Paizo Organized Play users fast, durable, account-aware session and charact
 |T7|>|regression, browser, real-account, production tests|V1,V2,V3,V4,V5,V6,V7,V8,V9,V10,I.deploy|
 |T8|>|commit, push, deploy exact verified commit|I.deploy|
 |T9|x|extract, persist, render, and test safe GM-recognition blocks|V11,V12,I.data,I.history|
+|T10|x|correct XP product classification and normalize saved runs|V13,I.data,I.history,I.deploy|
 
 ## §B
 
@@ -57,3 +59,4 @@ Give Paizo Organized Play users fast, durable, account-aware session and charact
 |B1|2026-07-10|already-played rows were discarded during scrape and import normalization|V1,V2|
 |B2|2026-07-10|Characters search depended on AG Grid quick-filter aggregation, whose date filter value reached a string formatter and rejected every row; prefilter shared row data and test formatted search values|V4,V6|
 |B3|2026-07-10|GM-recognition URLs passed sanitizer, but app CSP blocked every remote image|V12|
+|B4|2026-07-10|The Starfinder 2e fallback assigned 8 XP to every title lacking the literal word `Scenario`, while broad substring checks also mistook incidental `Bounty`/`Quest` title words for product classes|V13|

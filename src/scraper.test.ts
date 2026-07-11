@@ -87,6 +87,42 @@ test('session parser reads plain-text scenarios and keeps already-played rows at
   }
 });
 
+test('V13: XP classification follows product class and never awards eight XP', () => {
+  const scraper = new PaizoScraper({ maxBrowsers: 1 });
+  const calculateXP = (
+    scraper as unknown as {
+      calculateXP(
+        scenario: string,
+        prestigePoints: number,
+        pointsText: string,
+        gameSystem: string,
+      ): number;
+    }
+  ).calculateXP.bind(scraper);
+
+  const cases: Array<[string, number, string, number]> = [
+    ['SFS2 #1-23: Psychic Echoes', 0, 'Starfinder 2e', 4],
+    ["Starfinder Society Special #1-00: Collision's Wake", 2, 'Starfinder 2e', 4],
+    ['Starfinder Free RPG Day: Battle for Nova Rush', 2, 'Starfinder 2e', 4],
+    ['Starfinder Adventure: A Standard Chapter, Chapter 2', 4, 'Starfinder 2e', 4],
+    ['Starfinder Adventure Path #1: A Full Book', 4, 'Starfinder 2e', 12],
+    ['Pathfinder Bounty #15: Treasure off the Coast', 1, 'Pathfinder 2e', 1],
+    ['#1-05: Trailblazers’ Bounty', 4, 'Pathfinder 2e', 4],
+    ["Pathfinder Quest (Series 2) #26: Dragon's Plea", 2, 'Pathfinder 2e', 2],
+    ['Pathfinder Quest (Series 2) #17: Escorting a Mirage', 4, 'Pathfinder 2e', 2],
+    ['Quest #7: A Curious Claim', 1, 'Pathfinder 2e', 1],
+    ['Starfinder Bounty #1: The Cantina Job', 0, 'Starfinder 1e', 0.25],
+    ['Starfinder Quest #1: A Short Mission', 1, 'Starfinder 1e', 0.5],
+    ['SFS #3-14: A Standard Scenario', 2, 'Starfinder 1e', 1],
+    ['Starfinder Playtest Adventure: Chapter 1', 4, 'Starfinder Playtest', 0],
+  ];
+
+  const actual = cases.map(([scenario, prestige, gameSystem]) =>
+    calculateXP(scenario, prestige, '', gameSystem));
+  expect(actual).toEqual(cases.map(([, , , expected]) => expected));
+  expect(actual).not.toContain(8);
+});
+
 test('GM recognition parser keeps glyph markup and rejects ad-like content', async () => {
   const page = await browser.newPage();
   try {

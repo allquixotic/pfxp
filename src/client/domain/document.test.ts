@@ -77,6 +77,22 @@ describe('PFXP document domain', () => {
     expect(parsed.summary).toEqual({ Echo: { xp: 8 } });
   });
 
+  test('V13: normalizes legacy Starfinder 2e eight-XP rows and their summary', () => {
+    const parsed = parsePfxpDocument({
+      characters: [],
+      details: [session({
+        scenario: 'SFS2 #1-23: Psychic Echoes',
+        gameSystem: 'Starfinder 2e',
+        player: { orgplayid: 42, charid: 2701 },
+        xp: 8,
+      })],
+      summary: { Echo: { xp: 8 } },
+    });
+
+    expect(parsed.details[0]?.xp).toBe(4);
+    expect(parsed.summary).toEqual({ Echo: { xp: 4 } });
+  });
+
   test('keeps safe GM recognition blocks, omits unsafe blocks, and accepts legacy runs', () => {
     const safeBlock: GmRecognitionBlock = {
       nodes: [

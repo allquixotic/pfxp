@@ -84,13 +84,11 @@ Source of truth: The TypeScript in `src/scraper.ts` and `src/server.ts` defines 
    - Retain rows whose notes begin with "player has already played", force their XP reward to zero, and expose them to the UI's gray-row treatment and no-XP filter.
 
 6) Compute XP per row using game system-specific rules and aggregate per-character summaries:
-   - Bounty scenarios: 1 XP
-   - Quest scenarios: prestige points as XP
-   - Adventure Path scenarios: 12 XP
-   - Starfinder 2e scenarios: 4 XP (scenarios), 8 XP (adventures)
-   - Starfinder 1e: 1 XP
-   - Pathfinder 2e: 4 XP
-   - Pathfinder 1e: 1 XP
+   - Adventure Path books: 12 XP
+   - Second-edition Bounties: 1 XP; Quests: at most 2 reported XP; all other scenarios, adventures, and specials: 4 XP
+   - First-edition Bounties: 1/4 XP; Quests: 1/2 XP; all other scenarios, adventures, and specials: 1 XP
+   - Product classes require explicit title shapes (for example, `Pathfinder Bounty #...`); incidental words in scenario titles do not change the class
+   - Starfinder Playtest and no-credit rows: 0 XP
 
 The exact selectors, checks, and waits used here match the implementation in `src/scraper.ts` and should be treated as authoritative.
 

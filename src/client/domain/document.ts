@@ -10,7 +10,10 @@ import {
   type ValidationIssue,
   type ValidationResult,
 } from './models';
-import { isAlreadyPlayedSessionNote } from '../../session-rules';
+import {
+  isAlreadyPlayedSessionNote,
+  normalizeLegacyEightXp,
+} from '../../session-rules';
 import { createPaizoAccountIdentity, type PaizoAccountIdentity } from '../../account';
 import { sanitizeGmRecognitions } from '../../gm-recognition';
 
@@ -232,11 +235,19 @@ export function validatePfxpDocument(input: unknown): ValidationResult<PfxpDocum
   const rawCharacters = reader.array(reader.required(root, 'characters', '$'), '$.characters') ?? [];
   const parsedDetails = rawDetails
     .map((item, index) => readSession(reader, item, `$.details[${index}]`));
-  const hadAlreadyPlayedRows = parsedDetails.some((session) =>
-    isAlreadyPlayedSessionNote(session.notes) && session.xp !== 0);
-  const details = parsedDetails.map((session) => isAlreadyPlayedSessionNote(session.notes)
-    ? { ...session, xp: 0 }
-    : session);
+  let normalizedXp = false;
+  const details = parsedDetails.map((session) => {
+    const xp = isAlreadyPlayedSessionNote(session.notes)
+      ? 0
+      : normalizeLegacyEightXp({
+        scenario: session.scenario,
+        prestigePoints: session.prestigeReputation.prestigePoints,
+        gameSystem: session.gameSystem,
+        xp: session.xp,
+      });
+    if (xp !== session.xp) normalizedXp = true;
+    return xp === session.xp ? session : { ...session, xp };
+  });
   const summary = readLegacySummary(reader, reader.required(root, 'summary', '$'), '$.summary');
   const account = readAccount(reader, root.account, '$.account');
   const gmRecognitions = sanitizeGmRecognitions(root.gmRecognitions);
@@ -247,7 +258,7 @@ export function validatePfxpDocument(input: unknown): ValidationResult<PfxpDocum
       readCharacter(reader, item, `$.characters[${index}]`),
     ),
     details,
-    summary: hadAlreadyPlayedRows ? summarizeSessions(details) : summary,
+    summary: normalizedXp ? summarizeSessions(details) : summary,
   };
 
   return reader.issues.length > 0
